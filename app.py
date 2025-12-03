@@ -4,18 +4,16 @@ from datetime import datetime
 import time
 
 # --- CONFIGURATIE ---
-st.set_page_config(page_title="Snelle Kassa Invoer", page_icon="⚡", layout="centered")
+st.set_page_config(page_title="Kassa Unified", page_icon="⚡", layout="centered")
 
-# --- CSS HACK VOOR SCHONE LOOK ---
-# Dit verwijdert onnodige witruimte bovenaan zodat de app direct begint
+# CSS: Iets meer ruimte tussen de rijen voor leesbaarheid
 st.markdown("""
     <style>
-    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
+    .block-container { padding-top: 2rem; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- STATE MANAGEMENT ---
-# We gebruiken een teller om de tabellen te 'resetten' na opslaan
+# --- STATE ---
 if 'reset_counter' not in st.session_state:
     st.session_state.reset_counter = 0
 
@@ -23,121 +21,111 @@ def reset_app():
     st.session_state.reset_counter += 1
     st.session_state.omschrijving = ""
 
-# --- DATUM & OMSCHRIJVING ---
-st.subheader("📅 Dagontvangst Registreren")
-
+# --- HEADER ---
+st.subheader("📅 Dagontvangst")
 c1, c2 = st.columns([1, 2])
 with c1:
     datum = st.date_input("Datum", datetime.now(), label_visibility="collapsed")
 with c2:
-    omschrijving = st.text_input("Omschrijving", placeholder="Bijv. Dagtotaal winkel", label_visibility="collapsed", key="omschrijving")
+    omschrijving = st.text_input("Omschrijving", placeholder="Notitie...", label_visibility="collapsed", key="omschrijving")
 
 st.divider()
 
-# --- DE DATA GRID ---
-col_links, col_rechts = st.columns(2)
+# --- DE GECOMBINEERDE DATA ---
+# We maken één lijst. Dit zorgt dat 'Enter' gewoon doorloopt naar beneden.
+# We voegen een verborgen kolom 'Type' toe om straks te weten wat Omzet is en wat Geld is.
 
-# Unieke keys zorgen dat de tabellen leeg gemaakt kunnen worden
-key_omzet = f"grid_omzet_{st.session_state.reset_counter}"
-key_geld = f"grid_geld_{st.session_state.reset_counter}"
+if 'df_unified' not in st.session_state:
+    data = [
+        # OMZET DEEL
+        {"Type": "Omzet", "Omschrijving": "TICKET: 0% (BTW Vrijgesteld)", "Bedrag": 0.00},
+        {"Type": "Omzet", "Omschrijving": "TICKET: 6% (BTW 6%)",     "Bedrag": 0.00},
+        {"Type": "Omzet", "Omschrijving": "TICKET: 12% (BTW 12%)",     "Bedrag": 0.00},
+        {"Type": "Omzet", "Omschrijving": "TICKET: 21% (BTW 21%)",   "Bedrag": 0.00},
+        # BETAAL DEEL
+        {"Type": "Geld",  "Omschrijving": "LADE: Bancontact",         "Bedrag": 0.00},
+        {"Type": "Geld",  "Omschrijving": "LADE: Cash",               "Bedrag": 0.00},
+        {"Type": "Geld",  "Omschrijving": "LADE: Payconiq",           "Bedrag": 0.00},
+    ]
+    # We slaan dit op in een DataFrame
+    # Let op: We genereren het elke keer opnieuw in de editor op basis van de startwaarden
+    # om de reset makkelijk te maken, maar hier definiëren we de structuur.
+    pass 
 
-with col_links:
-    st.markdown("**1. TICKET (Omzet)**")
-    
-    # Startdata: Van 0% naar 21%
-    df_omzet_start = pd.DataFrame({
-        "Tarief": ["0% (Vrijgesteld)", "6% (Voeding)", "12% (Horeca)", "21% (Algemeen)"],
-        "Bedrag": [0.00, 0.00, 0.00, 0.00]
-    })
+# --- DE INPUT GRID (UNIFIED) ---
+# We bouwen het dataframe hier 'live' op zodat de reset werkt via de key
+df_start = pd.DataFrame([
+    {"Type": "Omzet", "Groep": "1. OMZET (Ticket)", "Categorie": "0% (Vrijgesteld)", "Bedrag": 0.00},
+    {"Type": "Omzet", "Groep": "1. OMZET (Ticket)", "Categorie": "6% (Voeding)",     "Bedrag": 0.00},
+    {"Type": "Omzet", "Groep": "1. OMZET (Ticket)", "Categorie": "12% (Horeca)",     "Bedrag": 0.00},
+    {"Type": "Omzet", "Groep": "1. OMZET (Ticket)", "Categorie": "21% (Algemeen)",   "Bedrag": 0.00},
+    {"Type": "Geld",  "Groep": "2. BETALING (Lade)", "Categorie": "Bancontact",       "Bedrag": 0.00},
+    {"Type": "Geld",  "Groep": "2. BETALING (Lade)", "Categorie": "Cash",             "Bedrag": 0.00},
+    {"Type": "Geld",  "Groep": "2. BETALING (Lade)", "Categorie": "Payconiq",         "Bedrag": 0.00},
+])
 
-    edited_omzet = st.data_editor(
-        df_omzet_start,
-        column_config={
-            "Tarief": st.column_config.TextColumn("Categorie", disabled=True),
-            "Bedrag": st.column_config.NumberColumn("Bedrag (€)", min_value=0, format="%.2f", required=True)
-        },
-        hide_index=True,
-        use_container_width=True,
-        num_rows="fixed", # Geen regels toevoegen
-        key=key_omzet
-    )
+st.info("👇 Eén lijst voor snelheid: Gebruik **ENTER** om direct naar het volgende vakje te springen.")
 
-with col_rechts:
-    st.markdown("**2. LADE (Geld)**")
-    
-    df_geld_start = pd.DataFrame({
-        "Methode": ["Bancontact", "Cash", "Payconiq"],
-        "Ontvangen": [0.00, 0.00, 0.00]
-    })
+edited_df = st.data_editor(
+    df_start,
+    column_config={
+        "Type": None, # Verberg deze technische kolom
+        "Groep": st.column_config.TextColumn("Sectie", disabled=True), # Alleen lezen
+        "Categorie": st.column_config.TextColumn("Omschrijving", disabled=True),
+        "Bedrag": st.column_config.NumberColumn("Bedrag (€)", min_value=0, format="%.2f", required=True)
+    },
+    hide_index=True,
+    use_container_width=True,
+    num_rows="fixed",
+    height=280, # Hoogte vastzetten zodat er geen scrollbalk komt
+    key=f"editor_unified_{st.session_state.reset_counter}"
+)
 
-    edited_geld = st.data_editor(
-        df_geld_start,
-        column_config={
-            "Methode": st.column_config.TextColumn("Betaalwijze", disabled=True),
-            "Ontvangen": st.column_config.NumberColumn("Bedrag (€)", min_value=0, format="%.2f", required=True)
-        },
-        hide_index=True,
-        use_container_width=True,
-        num_rows="fixed",
-        key=key_geld
-    )
+# --- BEREKENINGEN ---
+# We splitsen de dataframe weer op basis van de verborgen 'Type' kolom
+som_omzet = edited_df[edited_df["Type"] == "Omzet"]["Bedrag"].sum()
+som_geld = edited_df[edited_df["Type"] == "Geld"]["Bedrag"].sum()
 
-# --- LIVE BEREKENING ---
-totaal_omzet = edited_omzet["Bedrag"].sum()
-totaal_geld = edited_geld["Ontvangen"].sum()
-verschil = round(totaal_omzet - totaal_geld, 2)
+verschil = round(som_omzet - som_geld, 2)
 
-# --- VALIDATIE BALK ---
+# --- STATUS BALK ---
 st.divider()
 
-# Container voor de status
-status_container = st.container()
+col_totaal, col_knop = st.columns([1, 1])
 
-with status_container:
-    c_res1, c_res2, c_actie = st.columns([1, 1, 2])
-    
-    with c_res1:
-        st.metric("Totaal Ticket", f"€ {totaal_omzet:.2f}")
-    with c_res2:
-        st.metric("Totaal Geld", f"€ {totaal_geld:.2f}")
-    
-    with c_actie:
-        # Validatie Logica
-        if totaal_omzet == 0 and totaal_geld == 0:
-             st.info("👆 Vul de gegevens hierboven in.")
-             knop_text = "Nog geen gegevens"
-             knop_type = "secondary"
-             is_active = False
-             
-        elif verschil == 0:
-            st.success("✅ Saldo klopt perfect!")
-            knop_text = "💾 Opslaan & Dag Sluiten"
-            knop_type = "primary" # Maakt de knop rood/opvallend in Streamlit thema
-            is_active = True
-            
-        else:
-            st.error(f"⚠️ Verschil: € {verschil:.2f}")
-            knop_text = "⛔ Corrigeer saldo"
-            knop_type = "secondary"
-            is_active = False
+with col_totaal:
+    st.caption("Live Balans")
+    if verschil == 0 and som_omzet > 0:
+        st.markdown(f"### ✅ :green[€ {som_omzet:.2f}]")
+    elif verschil != 0:
+        st.markdown(f"### ❌ :red[Verschil: € {verschil:.2f}]")
+        st.caption(f"Ticket: € {som_omzet:.2f} | Lade: € {som_geld:.2f}")
+    else:
+        st.markdown("### € 0.00")
 
-        # De Knop
-        if st.button(knop_text, type=knop_type, disabled=not is_active, use_container_width=True):
+with col_knop:
+    # Validatie
+    is_valid = (som_omzet > 0) and (verschil == 0)
+    
+    label = "✅ Opslaan & Sluiten" if is_valid else "⛔ Saldo moet 0 zijn"
+    type_btn = "primary" if is_valid else "secondary"
+    
+    if st.button(label, type=type_btn, disabled=not is_valid, use_container_width=True):
+        
+        # --- EXPORT VOORBEREIDING ---
+        # Nu moeten we de waarden er weer uitvissen voor de database
+        # We zetten de Categorie als index om makkelijk te zoeken
+        final_data = edited_df.set_index("Categorie")["Bedrag"]
+        
+        # Voorbeeld hoe je data nu uitleest:
+        # omzet_21 = final_data["21% (Algemeen)"]
+        # cash = final_data["Cash"]
+        
+        with st.spinner("Opslaan..."):
+            time.sleep(0.8)
+            # save_to_google_sheets(...)
             
-            # --- HIER KOMT DE SAVE LOGICA ---
-            # Nu simuleren we het even:
-            with st.spinner("Bezig met opslaan naar Database..."):
-                time.sleep(1) # Fake save tijd
-                
-                # Hier halen we de data uit de grid voor de export later
-                # export_data = {
-                #    "datum": datum,
-                #    "omzet_21": edited_omzet.iloc[3]['Bedrag'],
-                #    "cash": edited_geld.iloc[1]['Ontvangen'],
-                #    ...
-                # }
-                
-            st.toast("Succesvol opgeslagen!", icon="🎉")
-            time.sleep(1)
-            reset_app()
-            st.rerun()
+        st.toast("Succesvol opgeslagen!", icon="🎉")
+        time.sleep(1)
+        reset_app()
+        st.rerun()
