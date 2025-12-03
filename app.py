@@ -6,7 +6,7 @@ import os
 
 # --- CONFIGURATIE ---
 DATA_FILE = "kassa_historiek.csv"
-# KIES HIER JE WACHTWOORD VOOR DE BOEKHOUDER
+SETTINGS_FILE = "kassa_settings.csv"
 ADMIN_PASSWORD = "Yuki2025!" 
 
 st.set_page_config(page_title="Kassa App", page_icon="💶", layout="centered")
@@ -20,17 +20,37 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- YUKI CODES ---
-YUKI_CODES = {
-    "Omzet_21": "700021",
-    "Omzet_12": "700012",
-    "Omzet_6":  "700006",
-    "Omzet_0":  "700000",
-    "Kas":      "570000",
-    "Kruisposten": "580000"
-}
+# --- FUNCTIES VOOR INSTELLINGEN (REKENINGSTELSEL) ---
 
-# --- FUNCTIES ---
+def load_settings():
+    """Laad de Yuki rekeningnummers of maak standaard waarden aan."""
+    if os.path.exists(SETTINGS_FILE):
+        return pd.read_csv(SETTINGS_FILE)
+    else:
+        # Standaard instellingen als er nog geen bestand is
+        default_data = [
+            {"Code": "Omzet_21", "Label": "Omzet 21%",    "Rekening": "700021", "BtwCode": "V21", "Type": "Credit"},
+            {"Code": "Omzet_12", "Label": "Omzet 12%",    "Rekening": "700012", "BtwCode": "V12", "Type": "Credit"},
+            {"Code": "Omzet_6",  "Label": "Omzet 6%",     "Rekening": "700006", "BtwCode": "V6",  "Type": "Credit"},
+            {"Code": "Omzet_0",  "Label": "Omzet 0%",     "Rekening": "700000", "BtwCode": "V0",  "Type": "Credit"},
+            {"Code": "Kas",      "Label": "Kas (Cash)",   "Rekening": "570000", "BtwCode": "",    "Type": "Debet"},
+            {"Code": "Kruis",    "Label": "Kruisposten (Elek)", "Rekening": "580000", "BtwCode": "", "Type": "Debet"},
+        ]
+        df = pd.DataFrame(default_data)
+        df.to_csv(SETTINGS_FILE, index=False)
+        return df
+
+def save_settings(df_settings):
+    """Sla de gewijzigde rekeningnummers op."""
+    df_settings.to_csv(SETTINGS_FILE, index=False)
+
+def get_yuki_mapping():
+    """Zet de settings tabel om naar een dictionary voor snelle lookup."""
+    df = load_settings()
+    # We maken een dict: {'Omzet_21': '700021', ...}
+    return dict(zip(df.Code, df.Rekening))
+
+# --- FUNCTIES VOOR DATA ---
 
 def load_database():
     if os.path.exists(DATA_FILE):
@@ -96,21 +116,25 @@ def generate_yuki_export(start_date, end_date):
     
     if selection.empty: return None
 
+    # HIER LADEN WE DE DYNAMISCHE REKENINGNUMMERS
+    CODES = get_yuki_mapping() 
+    
     yuki_rows = []
     for index, row in selection.iterrows():
         datum_fmt = pd.to_datetime(row['Datum']).strftime('%d-%m-%Y')
         desc = row['Omschrijving'] or "Dagontvangst"
         
         # Credit (Omzet)
-        if row['Omzet_21'] > 0: yuki_rows.append([datum_fmt, YUKI_CODES["Omzet_21"], f"Omzet 21% - {desc}", f"{-row['Omzet_21']:.2f}".replace('.',','), "V21"])
-        if row['Omzet_12'] > 0: yuki_rows.append([datum_fmt, YUKI_CODES["Omzet_12"], f"Omzet 12% - {desc}", f"{-row['Omzet_12']:.2f}".replace('.',','), "V12"])
-        if row['Omzet_6'] > 0:  yuki_rows.append([datum_fmt, YUKI_CODES["Omzet_6"], f"Omzet 6% - {desc}", f"{-row['Omzet_6']:.2f}".replace('.',','), "V6"])
-        if row['Omzet_0'] > 0:  yuki_rows.append([datum_fmt, YUKI_CODES["Omzet_0"], f"Omzet 0% - {desc}", f"{-row['Omzet_0']:.2f}".replace('.',','), "V0"])
+        if row['Omzet_21'] > 0: yuki_rows.append([datum_fmt, CODES["Omzet_21"], f"Omzet 21% - {desc}", f"{-row['Omzet_21']:.2f}".replace('.',','), "V21"])
+        if row['Omzet_12'] > 0: yuki_rows.append([datum_fmt, CODES["Omzet_12"], f"Omzet 12% - {desc}", f"{-row['Omzet_12']:.2f}".replace('.',','), "V12"])
+        if row['Omzet_6'] > 0:  yuki_rows.append([datum_fmt, CODES["Omzet_6"], f"Omzet 6% - {desc}", f"{-row['Omzet_6']:.2f}".replace('.',','), "V6"])
+        if row['Omzet_0'] > 0:  yuki_rows.append([datum_fmt, CODES["Omzet_0"], f"Omzet 0% - {desc}", f"{-row['Omzet_0']:.2f}".replace('.',','), "V0"])
             
         # Debet (Betalingen)
-        if row['Geld_Cash'] > 0: yuki_rows.append([datum_fmt, YUKI_CODES["Kas"], "Ontvangst Cash", f"{row['Geld_Cash']:.2f}".replace('.',','), ""])
+        if row['Geld_Cash'] > 0: yuki_rows.append([datum_fmt, CODES["Kas"], "Ontvangst Cash", f"{row['Geld_Cash']:.2f}".replace('.',','), ""])
+        
         tot_elec = row['Geld_Bancontact'] + row['Geld_Payconiq'] + row['Geld_Bonnen']
-        if tot_elec > 0:         yuki_rows.append([datum_fmt, YUKI_CODES["Kruisposten"], "Ontvangst Elec.", f"{tot_elec:.2f}".replace('.',','), ""])
+        if tot_elec > 0:         yuki_rows.append([datum_fmt, CODES["Kruis"], "Ontvangst Elec.", f"{tot_elec:.2f}".replace('.',','), ""])
 
     return pd.DataFrame(yuki_rows, columns=["Datum", "Grootboekrekening", "Omschrijving", "Bedrag", "BtwCode"])
 
@@ -119,35 +143,30 @@ if 'reset_count' not in st.session_state: st.session_state.reset_count = 0
 if 'show_success_toast' not in st.session_state: st.session_state['show_success_toast'] = False
 
 # ==========================================
-# ⚙️ SIDEBAR (NU MET LOGIN LOGICA)
+# ⚙️ SIDEBAR (LOGIN)
 # ==========================================
 with st.sidebar:
     st.header("⚙️ Menu")
     
-    # 1. Beveiliging Sectie
     pwd = st.text_input("Boekhouder Login", type="password", placeholder="Wachtwoord")
-    
-    # Check of wachtwoord klopt
     is_admin = (pwd == ADMIN_PASSWORD)
     
-    app_mode = "Invoer" # Standaard modus
+    app_mode = "Invoer" 
     
     if is_admin:
         st.success("🔓 Toegang verleend")
-        # Als admin is ingelogd, toon keuze menu
-        app_mode = st.radio("Kies scherm:", ["Invoer", "Export (Yuki)"])
+        # Admin kan kiezen: Invoer, Export OF Instellingen
+        app_mode = st.radio("Kies scherm:", ["Invoer", "Export (Yuki)", "Instellingen"])
         
         st.divider()
-        # Admin mag ook raw data downloaden
         if os.path.exists(DATA_FILE):
              with open(DATA_FILE, "rb") as f:
                 st.download_button("📥 Backup (.csv)", f, "backup_db.csv", "text/csv")
     
     st.divider()
     
-    # Instellingen alleen tonen bij Invoer
     if app_mode == "Invoer":
-        st.subheader("Instellingen")
+        st.subheader("Weergave")
         use_0  = st.checkbox("0% (Vrijgesteld)", value=True)
         use_6  = st.checkbox("6% (Voeding)", value=True)
         use_12 = st.checkbox("12% (Horeca)", value=False)
@@ -159,11 +178,11 @@ with st.sidebar:
         use_vouc = st.checkbox("Cadeaubonnen", value=False)
 
 # ==========================================
-# 📅 HOOFDSCHERM (WISSELT OP BASIS VAN MODUS)
+# 📅 HOOFDSCHERM
 # ==========================================
 
-# --- SCHERM 1: INVOER (Voor Klant & Boekhouder) ---
 if app_mode == "Invoer":
+    # --- DEZELFDE INVOERCODE ALS HIERVOOR ---
     st.header("📝 Dagontvangst") 
 
     if st.session_state['show_success_toast']:
@@ -240,7 +259,6 @@ if app_mode == "Invoer":
                   on_click=handle_save_click,
                   args=(datum, omschrijving, edited_df, som_omzet, som_geld, verschil))
 
-# --- SCHERM 2: EXPORT (Alleen zichtbaar voor admin) ---
 elif app_mode == "Export (Yuki)":
     st.header("📤 Export voor Boekhouding")
     st.info("Selecteer de periode die je wilt exporteren naar Yuki.")
@@ -266,3 +284,29 @@ elif app_mode == "Export (Yuki)":
             )
         else:
             st.warning("Geen gegevens gevonden in deze periode.")
+
+elif app_mode == "Instellingen":
+    st.header("⚙️ Rekeningstelsel Configureren")
+    st.info("Pas hier de grootboekrekeningen aan voor dit dossier.")
+    
+    # Laad de huidige instellingen
+    current_settings = load_settings()
+    
+    # Toon een editor waar de boekhouder de nummers kan aanpassen
+    edited_settings = st.data_editor(
+        current_settings,
+        column_config={
+            "Label": st.column_config.TextColumn("Omschrijving", disabled=True),
+            "Rekening": st.column_config.TextColumn("Grootboekrekening (Yuki)", required=True),
+            "BtwCode": st.column_config.TextColumn("BTW Code", required=False),
+            "Code": None, # Verberg technische ID's
+            "Type": None
+        },
+        hide_index=True,
+        use_container_width=True,
+        num_rows="fixed"
+    )
+    
+    if st.button("💾 Wijzigingen Opslaan", type="primary"):
+        save_settings(edited_settings)
+        st.success("Instellingen zijn opgeslagen! De volgende export gebruikt deze nummers.")
