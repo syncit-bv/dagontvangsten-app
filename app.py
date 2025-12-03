@@ -22,33 +22,47 @@ st.markdown("""
 
 # --- FUNCTIES VOOR INSTELLINGEN (REKENINGSTELSEL) ---
 
+def get_default_settings():
+    """Geeft de standaard configuratie terug."""
+    return [
+        {"Code": "Omzet_21",   "Label": "Omzet 21%",       "Rekening": "700021", "BtwCode": "V21", "Type": "Credit"},
+        {"Code": "Omzet_12",   "Label": "Omzet 12%",       "Rekening": "700012", "BtwCode": "V12", "Type": "Credit"},
+        {"Code": "Omzet_6",    "Label": "Omzet 6%",        "Rekening": "700006", "BtwCode": "V6",  "Type": "Credit"},
+        {"Code": "Omzet_0",    "Label": "Omzet 0%",        "Rekening": "700000", "BtwCode": "V0",  "Type": "Credit"},
+        
+        # HIER IS DE AANPASSING: APARTE REKENINGEN
+        {"Code": "Kas",        "Label": "Kas (Cash)",      "Rekening": "570000", "BtwCode": "",    "Type": "Debet"},
+        {"Code": "Bancontact", "Label": "Bancontact",      "Rekening": "580000", "BtwCode": "",    "Type": "Debet"},
+        {"Code": "Payconiq",   "Label": "Payconiq",        "Rekening": "580000", "BtwCode": "",    "Type": "Debet"},
+        {"Code": "Bonnen",     "Label": "Cadeaubonnen",    "Rekening": "440000", "BtwCode": "",    "Type": "Debet"},
+    ]
+
 def load_settings():
-    """Laad de Yuki rekeningnummers en forceer ze als TEKST."""
+    """Laad instellingen en update indien nodig naar nieuwe structuur."""
     if os.path.exists(SETTINGS_FILE):
-        # HIER ZAT DE FOUT: We moeten dtype=str meegeven
-        return pd.read_csv(SETTINGS_FILE, dtype={"Rekening": str, "BtwCode": str})
+        df = pd.read_csv(SETTINGS_FILE, dtype={"Rekening": str, "BtwCode": str})
+        
+        # AUTO-UPDATE CHECK:
+        # Als de oude code "Kruis" nog bestaat, of "Bancontact" ontbreekt, 
+        # dan regenereren we het bestand om de nieuwe velden toe te voegen.
+        codes = df["Code"].tolist()
+        if "Bancontact" not in codes or "Kruis" in codes:
+            st.toast("Instellingen bestand bijgewerkt naar nieuwe versie...", icon="⚙️")
+            df = pd.DataFrame(get_default_settings())
+            df["Rekening"] = df["Rekening"].astype(str)
+            df.to_csv(SETTINGS_FILE, index=False)
+            
+        return df
     else:
-        # Standaard instellingen als er nog geen bestand is
-        default_data = [
-            {"Code": "Omzet_21", "Label": "Omzet 21%",    "Rekening": "700021", "BtwCode": "V21", "Type": "Credit"},
-            {"Code": "Omzet_12", "Label": "Omzet 12%",    "Rekening": "700012", "BtwCode": "V12", "Type": "Credit"},
-            {"Code": "Omzet_6",  "Label": "Omzet 6%",     "Rekening": "700006", "BtwCode": "V6",  "Type": "Credit"},
-            {"Code": "Omzet_0",  "Label": "Omzet 0%",     "Rekening": "700000", "BtwCode": "V0",  "Type": "Credit"},
-            {"Code": "Kas",      "Label": "Kas (Cash)",   "Rekening": "570000", "BtwCode": "",    "Type": "Debet"},
-            {"Code": "Kruis",    "Label": "Kruisposten (Elek)", "Rekening": "580000", "BtwCode": "", "Type": "Debet"},
-        ]
-        df = pd.DataFrame(default_data)
-        # Zorg dat het ook bij aanmaken strings zijn
+        df = pd.DataFrame(get_default_settings())
         df["Rekening"] = df["Rekening"].astype(str)
         df.to_csv(SETTINGS_FILE, index=False)
         return df
 
 def save_settings(df_settings):
-    """Sla de gewijzigde rekeningnummers op."""
     df_settings.to_csv(SETTINGS_FILE, index=False)
 
 def get_yuki_mapping():
-    """Zet de settings tabel om naar een dictionary voor snelle lookup."""
     df = load_settings()
     return dict(zip(df.Code, df.Rekening))
 
@@ -118,7 +132,6 @@ def generate_yuki_export(start_date, end_date):
     
     if selection.empty: return None
 
-    # HIER LADEN WE DE DYNAMISCHE REKENINGNUMMERS
     CODES = get_yuki_mapping() 
     
     yuki_rows = []
@@ -126,17 +139,27 @@ def generate_yuki_export(start_date, end_date):
         datum_fmt = pd.to_datetime(row['Datum']).strftime('%d-%m-%Y')
         desc = row['Omschrijving'] or "Dagontvangst"
         
-        # Credit (Omzet) - Let op: we halen de codes nu uit de CODES dict
+        # 1. OMZET (Credit)
         if row['Omzet_21'] > 0: yuki_rows.append([datum_fmt, CODES.get("Omzet_21", "700021"), f"Omzet 21% - {desc}", f"{-row['Omzet_21']:.2f}".replace('.',','), "V21"])
         if row['Omzet_12'] > 0: yuki_rows.append([datum_fmt, CODES.get("Omzet_12", "700012"), f"Omzet 12% - {desc}", f"{-row['Omzet_12']:.2f}".replace('.',','), "V12"])
         if row['Omzet_6'] > 0:  yuki_rows.append([datum_fmt, CODES.get("Omzet_6", "700006"), f"Omzet 6% - {desc}", f"{-row['Omzet_6']:.2f}".replace('.',','), "V6"])
         if row['Omzet_0'] > 0:  yuki_rows.append([datum_fmt, CODES.get("Omzet_0", "700000"), f"Omzet 0% - {desc}", f"{-row['Omzet_0']:.2f}".replace('.',','), "V0"])
             
-        # Debet (Betalingen)
-        if row['Geld_Cash'] > 0: yuki_rows.append([datum_fmt, CODES.get("Kas", "570000"), "Ontvangst Cash", f"{row['Geld_Cash']:.2f}".replace('.',','), ""])
+        # 2. BETALINGEN (Debet)
+        # We kijken nu per type betaalmiddel naar de specifieke code in de instellingen
         
-        tot_elec = row['Geld_Bancontact'] + row['Geld_Payconiq'] + row['Geld_Bonnen']
-        if tot_elec > 0:         yuki_rows.append([datum_fmt, CODES.get("Kruis", "580000"), "Ontvangst Elec.", f"{tot_elec:.2f}".replace('.',','), ""])
+        if row['Geld_Cash'] > 0: 
+            yuki_rows.append([datum_fmt, CODES.get("Kas", "570000"), "Ontvangst Cash", f"{row['Geld_Cash']:.2f}".replace('.',','), ""])
+            
+        if row['Geld_Bancontact'] > 0:
+            yuki_rows.append([datum_fmt, CODES.get("Bancontact", "580000"), "Ontvangst Bancontact", f"{row['Geld_Bancontact']:.2f}".replace('.',','), ""])
+            
+        if row['Geld_Payconiq'] > 0:
+            yuki_rows.append([datum_fmt, CODES.get("Payconiq", "580000"), "Ontvangst Payconiq", f"{row['Geld_Payconiq']:.2f}".replace('.',','), ""])
+            
+        if row['Geld_Bonnen'] > 0:
+            # Standaard vaak een 44-rekening of diverse
+            yuki_rows.append([datum_fmt, CODES.get("Bonnen", "440000"), "Ontvangst Bonnen", f"{row['Geld_Bonnen']:.2f}".replace('.',','), ""])
 
     return pd.DataFrame(yuki_rows, columns=["Datum", "Grootboekrekening", "Omschrijving", "Bedrag", "BtwCode"])
 
@@ -291,7 +314,6 @@ elif app_mode == "Instellingen":
     
     current_settings = load_settings()
     
-    # Hier zat de fout, nu is de input gegarandeerd string
     edited_settings = st.data_editor(
         current_settings,
         column_config={
