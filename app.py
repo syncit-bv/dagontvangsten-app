@@ -114,4 +114,29 @@ st.divider()
 c_info, c_knop = st.columns([1, 1])
 
 with c_info:
-    if som_omzet
+    if som_omzet == 0:
+        st.info("👆 Begin met invullen...")
+    elif verschil == 0:
+        st.markdown(f"### ✅ :green[OK: € {som_omzet:.2f}]")
+    else:
+        st.markdown(f"### ❌ :red[Verschil: € {verschil:.2f}]")
+        st.caption(f"Ticket: € {som_omzet:.2f} | Lade: € {som_geld:.2f}")
+
+with c_knop:
+    is_valid = (som_omzet > 0) and (verschil == 0)
+    
+    if st.button(
+        "💾 Opslaan & Volgende", 
+        type="primary" if is_valid else "secondary", 
+        disabled=not is_valid, 
+        use_container_width=True
+    ):
+        # SIMULATIE OPSLAAN
+        with st.spinner("Bezig met opslaan..."):
+            time.sleep(0.5)
+            # Hier zou je de actieve velden uitlezen en opslaan
+        
+        st.toast("Opgeslagen!", icon="✅")
+        time.sleep(1)
+        reset_app()
+        st.rerun()
