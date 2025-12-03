@@ -167,4 +167,102 @@ if app_mode == "Invoer":
     st.header("📝 Dagontvangst") 
 
     if st.session_state['show_success_toast']:
-        st.toast("Succes
+        st.toast("Succesvol opgeslagen!", icon="✅")
+        st.session_state['show_success_toast'] = False
+
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        datum = st.date_input("Datum", datetime.now(), label_visibility="collapsed")
+    with c2:
+        omschrijving = st.text_input("Omschrijving", placeholder="Korte notitie...", label_visibility="collapsed", key="omschrijving")
+
+    st.divider()
+
+    existing_data = get_data_by_date(datum)
+    is_overwrite_mode = existing_data is not None
+
+    def get_val(col_name):
+        return float(existing_data.get(col_name, 0.0)) if is_overwrite_mode else 0.00
+
+    data_items = []
+    if use_0:  data_items.append({"Label": "🎫 0% (Vrijgesteld)", "Bedrag": get_val("Omzet_0"), "Type": "Omzet"})
+    if use_6:  data_items.append({"Label": "🎫 6% (Voeding)",     "Bedrag": get_val("Omzet_6"), "Type": "Omzet"})
+    if use_12: data_items.append({"Label": "🎫 12% (Horeca)",     "Bedrag": get_val("Omzet_12"), "Type": "Omzet"})
+    if use_21: data_items.append({"Label": "🎫 21% (Algemeen)",   "Bedrag": get_val("Omzet_21"), "Type": "Omzet"})
+
+    data_items.append({"Label": "⬇️ --- LADE INHOUD --- ⬇️", "Bedrag": None, "Type": "Separator"})
+
+    if use_bc:   data_items.append({"Label": "💳 Bancontact",   "Bedrag": get_val("Geld_Bancontact"), "Type": "Geld"})
+    if use_cash: data_items.append({"Label": "💶 Cash",         "Bedrag": get_val("Geld_Cash"), "Type": "Geld"})
+    if use_payq: data_items.append({"Label": "📱 Payconiq",     "Bedrag": get_val("Geld_Payconiq"), "Type": "Geld"})
+    if use_vouc: data_items.append({"Label": "🎁 Bonnen",       "Bedrag": get_val("Geld_Bonnen"), "Type": "Geld"})
+
+    df_start = pd.DataFrame(data_items)
+    saved_desc = existing_data.get("Omschrijving", "") if is_overwrite_mode else ""
+
+    overwrite_confirmed = True
+    if is_overwrite_mode:
+        st.warning(f"⚠️ Er zijn al gegevens voor {datum.strftime('%d-%m-%Y')}.")
+        if saved_desc: st.info(f"Notitie: {saved_desc}")
+        overwrite_confirmed = st.checkbox("Overschrijven toestaan", value=False)
+
+    edited_df = st.data_editor(
+        df_start,
+        column_config={
+            "Label": st.column_config.TextColumn("Omschrijving", disabled=True),
+            "Bedrag": st.column_config.NumberColumn("Waarde (€)", min_value=0, format="%.2f"),
+            "Type": None
+        },
+        hide_index=True, use_container_width=True, num_rows="fixed",
+        height=(len(data_items) * 35) + 38,
+        key=f"editor_{datum}_{st.session_state.reset_count}"
+    )
+
+    regels = edited_df[edited_df["Type"] != "Separator"].copy()
+    regels["Bedrag"] = regels["Bedrag"].fillna(0.0)
+    som_omzet = regels[regels["Type"] == "Omzet"]["Bedrag"].sum()
+    som_geld = regels[regels["Type"] == "Geld"]["Bedrag"].sum()
+    verschil = round(som_omzet - som_geld, 2)
+
+    st.divider()
+    c_inf, c_btn = st.columns([1, 1])
+
+    with c_inf:
+        if som_omzet == 0: st.info("👆 Vul de gegevens in.")
+        elif verschil == 0: st.markdown(f"### ✅ :green[OK: € {som_omzet:.2f}]")
+        else: st.markdown(f"### ❌ :red[Verschil: € {verschil:.2f}]")
+
+    with c_btn:
+        is_valid = (som_omzet > 0) and (verschil == 0) and overwrite_confirmed
+        label = "🔄 Overschrijven" if is_overwrite_mode else "💾 Opslaan"
+        
+        st.button(label, type="primary", disabled=not is_valid, use_container_width=True,
+                  on_click=handle_save_click,
+                  args=(datum, omschrijving, edited_df, som_omzet, som_geld, verschil))
+
+# --- SCHERM 2: EXPORT (Alleen zichtbaar voor admin) ---
+elif app_mode == "Export (Yuki)":
+    st.header("📤 Export voor Boekhouding")
+    st.info("Selecteer de periode die je wilt exporteren naar Yuki.")
+    
+    col_start, col_end = st.columns(2)
+    start_date = col_start.date_input("Van", datetime(datetime.now().year, datetime.now().month, 1))
+    end_date = col_end.date_input("Tot", datetime.now())
+    
+    if st.button("Genereer Export Bestand", type="primary"):
+        yuki_df = generate_yuki_export(start_date, end_date)
+        
+        if yuki_df is not None:
+            st.success(f"✅ {len(yuki_df)} boekingsregels gegenereerd.")
+            st.dataframe(yuki_df, hide_index=True)
+            
+            csv = yuki_df.to_csv(sep=';', index=False).encode('utf-8')
+            
+            st.download_button(
+                label="📥 Download Yuki Bestand (.csv)",
+                data=csv,
+                file_name=f"yuki_export_{start_date}_{end_date}.csv",
+                mime="text/csv"
+            )
+        else:
+            st.warning("Geen gegevens gevonden in deze periode.")
