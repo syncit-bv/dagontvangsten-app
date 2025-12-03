@@ -6,20 +6,22 @@ import os
 
 # --- CONFIGURATIE ---
 DATA_FILE = "kassa_historiek.csv"
-st.set_page_config(page_title="Kassa Op Maat", page_icon="💾", layout="centered")
+st.set_page_config(page_title="Kassa Beheer", page_icon="💾", layout="centered")
 
 # CSS Styling
 st.markdown("""
     <style>
     .block-container { padding-top: 4rem; padding-bottom: 2rem; }
     [data-testid="stDataFrameResizable"] { border: 1px solid #ddd; border-radius: 5px; }
+    /* Maak de waarschuwing opvallend */
+    .stAlert { margin-top: 1rem; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNCTIES VOOR OPSLAG ---
+# --- DATABASE FUNCTIES ---
 
 def load_database():
-    """Laad het bestaande bestand of maak een nieuw aan."""
+    """Laad het CSV bestand of maak een nieuwe dataframe aan."""
     if os.path.exists(DATA_FILE):
         return pd.read_csv(DATA_FILE)
     else:
@@ -31,12 +33,31 @@ def load_database():
         ]
         return pd.DataFrame(columns=cols)
 
-def save_transaction(datum, omschrijving, df_input, totaal_omzet, totaal_geld, verschil):
-    """Vertaalt de visuele lijst naar een database regel."""
-    df_db = load_database()
+def get_data_by_date(datum_obj):
+    """Zoek of er al een regel bestaat voor deze datum."""
+    df = load_database()
+    datum_str = str(datum_obj) # Datum object naar string 'YYYY-MM-DD'
     
+    # Filter de dataframe
+    match = df[df['Datum'] == datum_str]
+    
+    if not match.empty:
+        # Geef de eerste (enige) regel terug als een Series (dictionary-achtig)
+        return match.iloc[0] 
+    return None
+
+def save_transaction(datum, omschrijving, df_input, totaal_omzet, totaal_geld, verschil):
+    """Slaat data op. OVERSCHRIJFT als de datum al bestaat."""
+    df_db = load_database()
+    datum_str = str(datum)
+    
+    # 1. VERWIJDER oude data voor deze datum (indien aanwezig)
+    # We behouden alles BEHALVE de regels met deze datum
+    df_db = df_db[df_db['Datum'] != datum_str]
+    
+    # 2. Maak de nieuwe regel
     new_row = {
-        "Datum": datum,
+        "Datum": datum_str,
         "Omschrijving": omschrijving,
         "Totaal_Omzet": totaal_omzet,
         "Totaal_Geld": totaal_geld,
@@ -46,7 +67,7 @@ def save_transaction(datum, omschrijving, df_input, totaal_omzet, totaal_geld, v
         "Geld_Bancontact": 0.0, "Geld_Cash": 0.0, "Geld_Payconiq": 0.0, "Geld_Bonnen": 0.0
     }
     
-    # Loop door de input om de waarden te vullen
+    # 3. Vul de waarden uit de editor
     for index, row in df_input.iterrows():
         label = row['Label']
         bedrag = row['Bedrag']
@@ -61,24 +82,24 @@ def save_transaction(datum, omschrijving, df_input, totaal_omzet, totaal_geld, v
             elif "Payconiq" in label: new_row["Geld_Payconiq"] = bedrag
             elif "Bonnen" in label: new_row["Geld_Bonnen"] = bedrag
 
+    # 4. Toevoegen en sorteren
     new_entry_df = pd.DataFrame([new_row])
     df_db = pd.concat([df_db, new_entry_df], ignore_index=True)
+    
+    # Sorteer op datum zodat de lijst netjes blijft
+    df_db = df_db.sort_values(by="Datum", ascending=False)
+    
     df_db.to_csv(DATA_FILE, index=False)
 
-# --- CALLBACK FUNCTIE (DE FIX) ---
-# Deze functie wordt aangeroepen ZODRA je op de knop drukt, maar VOORDAT het scherm ververst.
 def handle_save_click(datum, omschrijving, edited_df, som_omzet, som_geld, verschil):
-    # 1. Opslaan
     save_transaction(datum, omschrijving, edited_df, som_omzet, som_geld, verschil)
-    
-    # 2. Resetten (Dit mag hier wel!)
     st.session_state.reset_count += 1
-    st.session_state.omschrijving = "" 
-    
-    # 3. Toast trigger aanzetten (wordt getoond na rerun)
     st.session_state['show_success_toast'] = True
+    # Omschrijving NIET leegmaken als we aan het bewerken zijn, dat voelt raar.
+    # Maar voor een nieuwe dag wel. Laten we het resetten voor de veiligheid.
+    st.session_state.omschrijving = "" 
 
-# --- STATE MANAGEMENT ---
+# --- STATE ---
 if 'reset_count' not in st.session_state:
     st.session_state.reset_count = 0
 if 'show_success_toast' not in st.session_state:
@@ -89,23 +110,18 @@ if 'show_success_toast' not in st.session_state:
 # ==========================================
 with st.sidebar:
     st.header("⚙️ Instellingen")
-    
     st.subheader("BTW")
     use_0  = st.checkbox("0% (Vrijgesteld)", value=True)
     use_6  = st.checkbox("6% (Voeding)", value=True)
     use_12 = st.checkbox("12% (Horeca)", value=False)
     use_21 = st.checkbox("21% (Algemeen)", value=True)
-    
     st.divider()
-    
     st.subheader("Betaling")
     use_bc   = st.checkbox("Bancontact", value=True)
     use_cash = st.checkbox("Cash", value=True)
     use_payq = st.checkbox("Payconiq", value=True)
     use_vouc = st.checkbox("Cadeaubonnen", value=False)
-    
     st.divider()
-    
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "rb") as f:
             st.download_button("📥 Download Excel/CSV", f, "dagontvangsten.csv", "text/csv")
@@ -116,39 +132,75 @@ with st.sidebar:
 
 st.header("📅 Dagontvangst") 
 
-# Toon toast indien net opgeslagen
 if st.session_state['show_success_toast']:
     st.toast("Succesvol opgeslagen!", icon="✅")
     st.session_state['show_success_toast'] = False
 
 c1, c2 = st.columns([1, 2])
 with c1:
+    # Als de datum verandert, herlaadt de hele pagina. 
+    # We gebruiken dit om nieuwe data op te halen.
     datum = st.date_input("Datum", datetime.now(), label_visibility="collapsed")
 with c2:
-    # Key is belangrijk voor de reset
     omschrijving = st.text_input("Omschrijving", placeholder="Korte notitie...", label_visibility="collapsed", key="omschrijving")
 
 st.divider()
 
-# --- DATAFRAME BOUWEN ---
+# --- DATA OPHALEN LOGICA ---
+# 1. Kijk of er data is voor deze dag
+existing_data = get_data_by_date(datum)
+is_overwrite_mode = existing_data is not None
+
+# 2. Bouw de tabel op (LEEG of GEVULD)
 data_items = []
 
-if use_0:  data_items.append({"Label": "🎫 0% (Vrijgesteld)", "Bedrag": 0.00, "Type": "Omzet"})
-if use_6:  data_items.append({"Label": "🎫 6% (Voeding)",     "Bedrag": 0.00, "Type": "Omzet"})
-if use_12: data_items.append({"Label": "🎫 12% (Horeca)",     "Bedrag": 0.00, "Type": "Omzet"})
-if use_21: data_items.append({"Label": "🎫 21% (Algemeen)",   "Bedrag": 0.00, "Type": "Omzet"})
+# Helper functie om de waarde te bepalen
+def get_val(col_name):
+    if is_overwrite_mode:
+        return float(existing_data.get(col_name, 0.0))
+    return 0.00
 
+# OMZET
+if use_0:  data_items.append({"Label": "🎫 0% (Vrijgesteld)", "Bedrag": get_val("Omzet_0"), "Type": "Omzet"})
+if use_6:  data_items.append({"Label": "🎫 6% (Voeding)",     "Bedrag": get_val("Omzet_6"), "Type": "Omzet"})
+if use_12: data_items.append({"Label": "🎫 12% (Horeca)",     "Bedrag": get_val("Omzet_12"), "Type": "Omzet"})
+if use_21: data_items.append({"Label": "🎫 21% (Algemeen)",   "Bedrag": get_val("Omzet_21"), "Type": "Omzet"})
+
+# SEPARATOR
 data_items.append({"Label": "⬇️ --- LADE INHOUD --- ⬇️", "Bedrag": None, "Type": "Separator"})
 
-if use_bc:   data_items.append({"Label": "💳 Bancontact",   "Bedrag": 0.00, "Type": "Geld"})
-if use_cash: data_items.append({"Label": "💶 Cash",         "Bedrag": 0.00, "Type": "Geld"})
-if use_payq: data_items.append({"Label": "📱 Payconiq",     "Bedrag": 0.00, "Type": "Geld"})
-if use_vouc: data_items.append({"Label": "🎁 Bonnen",       "Bedrag": 0.00, "Type": "Geld"})
+# GELD
+if use_bc:   data_items.append({"Label": "💳 Bancontact",   "Bedrag": get_val("Geld_Bancontact"), "Type": "Geld"})
+if use_cash: data_items.append({"Label": "💶 Cash",         "Bedrag": get_val("Geld_Cash"), "Type": "Geld"})
+if use_payq: data_items.append({"Label": "📱 Payconiq",     "Bedrag": get_val("Geld_Payconiq"), "Type": "Geld"})
+if use_vouc: data_items.append({"Label": "🎁 Bonnen",       "Bedrag": get_val("Geld_Bonnen"), "Type": "Geld"})
 
 df_start = pd.DataFrame(data_items)
 
+# Als er bestaande data is, vullen we ook de omschrijving in (indien nog leeg)
+if is_overwrite_mode and not omschrijving:
+    # Dit is lastig in Streamlit omdat we 'omschrijving' input widget al getekend hebben.
+    # We tonen het ter info in de waarschuwing.
+    saved_desc = existing_data.get("Omschrijving", "")
+else:
+    saved_desc = ""
+
+
+# --- WAARSCHUWING BIJ BESTAANDE DATA ---
+overwrite_confirmed = True # Standaard true als het nieuwe data is
+
+if is_overwrite_mode:
+    st.warning(f"⚠️ **Let op:** Er zijn al gegevens voor {datum.strftime('%d-%m-%Y')}.")
+    if saved_desc:
+        st.info(f"💾 Opgeslagen notitie: *{saved_desc}*")
+    
+    # De gebruiker MOET dit aanvinken om door te gaan
+    overwrite_confirmed = st.checkbox("Ik begrijp dat de oude gegevens worden overschreven.", value=False)
+
+
 # --- EDITOR ---
-st.caption("Typ het bedrag en druk op **ENTER**.")
+# We gebruiken de datum in de key. Als datum wijzigt -> nieuwe key -> harde reset van editor
+editor_key = f"editor_{datum}_{st.session_state.reset_count}"
 
 edited_df = st.data_editor(
     df_start,
@@ -161,7 +213,7 @@ edited_df = st.data_editor(
     use_container_width=True,
     num_rows="fixed",
     height=(len(data_items) * 35) + 38,
-    key=f"editor_dynamic_{st.session_state.reset_count}"
+    key=editor_key 
 )
 
 # --- BEREKENINGEN ---
@@ -185,13 +237,20 @@ with c_info:
         st.markdown(f"### ❌ :red[Verschil: € {verschil:.2f}]")
 
 with c_knop:
-    is_valid = (som_omzet > 0) and (verschil == 0)
+    # Validatie regels:
+    # 1. Saldo moet 0 zijn
+    # 2. Omzet > 0
+    # 3. Als het overschrijven is, moet de checkbox aangevinkt zijn
     
-    # HIER IS DE WIJZIGING:
-    # We gebruiken on_click om de functie 'handle_save_click' aan te roepen
-    # en we geven alle benodigde variabelen mee via 'args'.
+    is_saldo_ok = (som_omzet > 0) and (verschil == 0)
+    is_valid = is_saldo_ok and overwrite_confirmed
+    
+    btn_text = "💾 Opslaan"
+    if is_overwrite_mode:
+        btn_text = "🔄 Overschrijven & Opslaan"
+    
     st.button(
-        "💾 Opslaan & Volgende", 
+        btn_text, 
         type="primary", 
         disabled=not is_valid, 
         use_container_width=True,
@@ -203,4 +262,4 @@ with c_knop:
 if os.path.exists(DATA_FILE):
     with st.expander("🔍 Bekijk laatst ingevoerde gegevens"):
         df_hist = pd.read_csv(DATA_FILE)
-        st.dataframe(df_hist.sort_values(by="Timestamp", ascending=False).head(5))
+        st.dataframe(df_hist.sort_values(by="Datum", ascending=False).head(5))
