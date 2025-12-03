@@ -8,7 +8,7 @@ import os
 DATA_FILE = "kassa_historiek.csv"
 st.set_page_config(page_title="Kassa Op Maat", page_icon="💾", layout="centered")
 
-# CSS: Styling
+# CSS Styling
 st.markdown("""
     <style>
     .block-container { padding-top: 4rem; padding-bottom: 2rem; }
@@ -23,7 +23,6 @@ def load_database():
     if os.path.exists(DATA_FILE):
         return pd.read_csv(DATA_FILE)
     else:
-        # Definieer de kolommen die we altijd willen hebben
         cols = [
             "Datum", "Omschrijving", "Totaal_Omzet", "Totaal_Geld", "Verschil",
             "Omzet_0", "Omzet_6", "Omzet_12", "Omzet_21",
@@ -34,11 +33,8 @@ def load_database():
 
 def save_transaction(datum, omschrijving, df_input, totaal_omzet, totaal_geld, verschil):
     """Vertaalt de visuele lijst naar een database regel."""
-    
-    # 1. We laden de oude data
     df_db = load_database()
     
-    # 2. We maken een nieuwe lege regel
     new_row = {
         "Datum": datum,
         "Omschrijving": omschrijving,
@@ -46,19 +42,17 @@ def save_transaction(datum, omschrijving, df_input, totaal_omzet, totaal_geld, v
         "Totaal_Geld": totaal_geld,
         "Verschil": verschil,
         "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        # Zet standaardwaarden op 0.00
         "Omzet_0": 0.0, "Omzet_6": 0.0, "Omzet_12": 0.0, "Omzet_21": 0.0,
         "Geld_Bancontact": 0.0, "Geld_Cash": 0.0, "Geld_Payconiq": 0.0, "Geld_Bonnen": 0.0
     }
     
-    # 3. We lopen door de invoerlijst en vullen de juiste vakjes
-    # We gebruiken 'in' om te zoeken, zodat emoji's geen probleem zijn
+    # Loop door de input om de waarden te vullen
     for index, row in df_input.iterrows():
         label = row['Label']
         bedrag = row['Bedrag']
         
-        if bedrag > 0: # Alleen opslaan wat niet 0 is
-            if "0%" in label:  new_row["Omzet_0"] = bedrag
+        if bedrag > 0:
+            if "0%" in label:    new_row["Omzet_0"] = bedrag
             elif "6%" in label:  new_row["Omzet_6"] = bedrag
             elif "12%" in label: new_row["Omzet_12"] = bedrag
             elif "21%" in label: new_row["Omzet_21"] = bedrag
@@ -67,18 +61,28 @@ def save_transaction(datum, omschrijving, df_input, totaal_omzet, totaal_geld, v
             elif "Payconiq" in label: new_row["Geld_Payconiq"] = bedrag
             elif "Bonnen" in label: new_row["Geld_Bonnen"] = bedrag
 
-    # 4. Toevoegen en opslaan (gebruik pd.concat i.p.v. append)
     new_entry_df = pd.DataFrame([new_row])
     df_db = pd.concat([df_db, new_entry_df], ignore_index=True)
     df_db.to_csv(DATA_FILE, index=False)
 
+# --- CALLBACK FUNCTIE (DE FIX) ---
+# Deze functie wordt aangeroepen ZODRA je op de knop drukt, maar VOORDAT het scherm ververst.
+def handle_save_click(datum, omschrijving, edited_df, som_omzet, som_geld, verschil):
+    # 1. Opslaan
+    save_transaction(datum, omschrijving, edited_df, som_omzet, som_geld, verschil)
+    
+    # 2. Resetten (Dit mag hier wel!)
+    st.session_state.reset_count += 1
+    st.session_state.omschrijving = "" 
+    
+    # 3. Toast trigger aanzetten (wordt getoond na rerun)
+    st.session_state['show_success_toast'] = True
+
 # --- STATE MANAGEMENT ---
 if 'reset_count' not in st.session_state:
     st.session_state.reset_count = 0
-
-def reset_app():
-    st.session_state.reset_count += 1
-    st.session_state.omschrijving = ""
+if 'show_success_toast' not in st.session_state:
+    st.session_state['show_success_toast'] = False
 
 # ==========================================
 # ⚙️ SIDEBAR
@@ -102,15 +106,9 @@ with st.sidebar:
     
     st.divider()
     
-    # DOWNLOAD KNOP VOOR DE ADMINISTRATIE
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "rb") as f:
-            st.download_button(
-                label="📥 Download Excel/CSV",
-                data=f,
-                file_name="dagontvangsten.csv",
-                mime="text/csv"
-            )
+            st.download_button("📥 Download Excel/CSV", f, "dagontvangsten.csv", "text/csv")
 
 # ==========================================
 # 📅 HOOFDSCHERM
@@ -118,10 +116,16 @@ with st.sidebar:
 
 st.header("📅 Dagontvangst") 
 
+# Toon toast indien net opgeslagen
+if st.session_state['show_success_toast']:
+    st.toast("Succesvol opgeslagen!", icon="✅")
+    st.session_state['show_success_toast'] = False
+
 c1, c2 = st.columns([1, 2])
 with c1:
     datum = st.date_input("Datum", datetime.now(), label_visibility="collapsed")
 with c2:
+    # Key is belangrijk voor de reset
     omschrijving = st.text_input("Omschrijving", placeholder="Korte notitie...", label_visibility="collapsed", key="omschrijving")
 
 st.divider()
@@ -183,33 +187,20 @@ with c_info:
 with c_knop:
     is_valid = (som_omzet > 0) and (verschil == 0)
     
-    if st.button("💾 Opslaan & Volgende", type="primary", disabled=not is_valid, use_container_width=True):
-        
-        # 1. VISUELE FEEDBACK
-        with st.spinner("Gegevens worden opgeslagen..."):
-            
-            # 2. DATA OPSLAAN
-            save_transaction(
-                datum=datum,
-                omschrijving=omschrijving,
-                df_input=edited_df,       # We sturen de ingevulde tabel mee
-                totaal_omzet=som_omzet,
-                totaal_geld=som_geld,
-                verschil=verschil
-            )
-            time.sleep(0.5) # Korte pauze voor het gevoel
-        
-        # 3. SUCCES MELDING
-        st.toast("Succesvol opgeslagen in bestand!", icon="✅")
-        time.sleep(1)
-        
-        # 4. RESET
-        reset_app()
-        st.rerun()
+    # HIER IS DE WIJZIGING:
+    # We gebruiken on_click om de functie 'handle_save_click' aan te roepen
+    # en we geven alle benodigde variabelen mee via 'args'.
+    st.button(
+        "💾 Opslaan & Volgende", 
+        type="primary", 
+        disabled=not is_valid, 
+        use_container_width=True,
+        on_click=handle_save_click,
+        args=(datum, omschrijving, edited_df, som_omzet, som_geld, verschil)
+    )
 
-# --- HISTORIEK TONEN (OPTIONEEL ONDERAAN) ---
+# --- HISTORIEK ---
 if os.path.exists(DATA_FILE):
     with st.expander("🔍 Bekijk laatst ingevoerde gegevens"):
         df_hist = pd.read_csv(DATA_FILE)
-        # Toon nieuwste bovenaan
         st.dataframe(df_hist.sort_values(by="Timestamp", ascending=False).head(5))
