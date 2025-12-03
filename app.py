@@ -8,102 +8,96 @@ if 'form_submitted' not in st.session_state:
     st.session_state.form_submitted = False
 
 def clear_form():
-    st.session_state.datum = datetime.now()
-    st.session_state.bedrag_incl_input = 0.00 # Reset de input
-    st.session_state.bc = 0.00
-    st.session_state.cash = 0.00
-    st.session_state.payq = 0.00
+    # We resetten de datum niet, dat is irritant voor de gebruiker.
+    # We resetten alleen de cijfers.
+    st.session_state.bedrag_incl_input = None 
+    st.session_state.bc = None
+    st.session_state.cash = None
+    st.session_state.payq = None
     st.session_state.omschrijving = ""
 
-# --- PAGINA ---
-st.set_page_config(page_title="Kassa Demo", page_icon="💶", layout="centered")
+# --- PAGINA CONFIG ---
+st.set_page_config(page_title="Kassa Demo", page_icon="⚡", layout="centered")
 
-st.title("💶 Dagontvangsten")
-st.caption("Demo versie: Input op basis van ticket inclusief BTW")
+st.title("⚡ Snelle Invoer")
+st.caption("Gebruik TAB om te navigeren. Druk op ENTER om op te slaan.")
 
-# --- INVOER BOVENAAN ---
-col_date, col_cat = st.columns([1, 2])
-with col_date:
-    datum = st.date_input("Datum", key="datum")
-with col_cat:
-    categorie = st.selectbox(
-        "Categorie", 
-        ["Verkoop 21%", "Verkoop 6%", "Verkoop 12%", "Diensten", "Anders"],
-        key="categorie"
-    )
-
-omschrijving = st.text_input("Omschrijving", key="omschrijving")
-
-st.markdown("---")
-
-# --- DE BALANS ---
-col_links, col_rechts = st.columns(2)
-
-with col_links:
-    st.subheader("1. Omzet (Ticket)")
-    st.caption("Vul het totaalbedrag van het Z-ticket in.")
+# --- INPUT FORMULIER ---
+# Door 'clear_on_submit=False' te gebruiken houden we controle over wat we wissen
+with st.form(key='dagontvangsten_form', clear_on_submit=False):
     
-    # AANPASSING: Input is nu INCLUSIEF BTW
-    bedrag_incl_input = st.number_input(
-        "Totaalbedrag (Incl. BTW)", 
-        min_value=0.0, 
-        step=0.01, 
-        format="%.2f", 
-        key="bedrag_incl_input"
-    )
+    # 1. BOVENSTUK
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        datum = st.date_input("Datum", key="datum")
+    with c2:
+        categorie = st.selectbox(
+            "Categorie", 
+            ["Verkoop 21%", "Verkoop 6%", "Verkoop 12%", "Diensten", "Anders"],
+            key="categorie"
+        )
     
-    # BTW Selectie & Terugrekenen
-    def_btw = 3 # 21%
-    if "6%" in categorie: def_btw = 1
-    elif "12%" in categorie: def_btw = 2
+    omschrijving = st.text_input("Omschrijving", key="omschrijving")
     
-    btw_pct = st.selectbox("BTW Tarief in ticket", [0, 6, 12, 21], index=def_btw)
+    st.markdown("---")
     
-    # De wiskunde: Bedrag / 1.21 = Excl
-    if bedrag_incl_input > 0:
-        factor = 1 + (btw_pct / 100)
-        bedrag_excl_calc = bedrag_incl_input / factor
-        bedrag_btw_calc = bedrag_incl_input - bedrag_excl_calc
+    # 2. DE CIJFERS (Links vs Rechts)
+    col_links, col_rechts = st.columns(2)
+
+    with col_links:
+        st.subheader("Ticket (Omzet)")
+        # value=None zorgt dat het vakje leeg is. Geen 0.00 om weg te halen!
+        bedrag_incl_input = st.number_input(
+            "Totaal Incl. BTW", 
+            min_value=0.0, 
+            step=0.01, 
+            format="%.2f", 
+            value=None,  # HIER ZIT DE TRUC VOOR SNELHEID
+            key="bedrag_incl_input",
+            placeholder="0.00" 
+        )
         
-        # Toon de berekening lichtgrijs ter info
-        st.info(f"Excl: € {bedrag_excl_calc:.2f} | BTW: € {bedrag_btw_calc:.2f}")
+        # BTW visueel maken (Berekening gebeurt pas na submit of bij rerun)
+        def_btw = 3 
+        if "6%" in categorie: def_btw = 1
+        elif "12%" in categorie: def_btw = 2
+        btw_pct = st.selectbox("BTW %", [0, 6, 12, 21], index=def_btw)
+
+    with col_rechts:
+        st.subheader("Betalingen (Geld)")
+        # Ook hier starten we leeg
+        bc = st.number_input("Bancontact", min_value=0.0, step=0.01, format="%.2f", value=None, key="bc", placeholder="0.00")
+        cash = st.number_input("Cash", min_value=0.0, step=0.01, format="%.2f", value=None, key="cash", placeholder="0.00")
+        payq = st.number_input("Payconiq", min_value=0.0, step=0.01, format="%.2f", value=None, key="payq", placeholder="0.00")
+
+    st.markdown("---")
+    
+    # De Submit knop binnen het formulier
+    # In veel browsers triggert 'Enter' in het laatste veld deze knop
+    submit_knop = st.form_submit_button("Verwerk Invoer", type="primary", use_container_width=True)
+
+# --- VERWERKING (BUITEN HET FORMULIER) ---
+if submit_knop:
+    # 1. Zet 'None' om naar 0.0 voor de berekening
+    val_omzet = bedrag_incl_input if bedrag_incl_input is not None else 0.0
+    val_bc = bc if bc is not None else 0.0
+    val_cash = cash if cash is not None else 0.0
+    val_payq = payq if payq is not None else 0.0
+    
+    val_totaal_ontvangen = val_bc + val_cash + val_payq
+    verschil = round(val_omzet - val_totaal_ontvangen, 2)
+
+    # 2. Validatie
+    if val_omzet > 0:
+        if verschil == 0:
+            st.success("✅ OPGESLAGEN! Saldo klopt.")
+            # Hier zou je save_to_google_sheets() aanroepen
+            
+            time.sleep(1) # Korte pauze voor feedback
+            clear_form() # Maak velden leeg
+            st.rerun()   # Ververs pagina voor nieuwe invoer
+        else:
+            st.error(f"⚠️ FOUT: Verschil van € {verschil:.2f}")
+            st.warning(f"Omzet: € {val_omzet} | Geteld: € {val_totaal_ontvangen}")
     else:
-        bedrag_excl_calc = 0
-        bedrag_btw_calc = 0
-    
-    # Grote metric voor de vergelijking
-    st.metric("Te verantwoorden", f"€ {bedrag_incl_input:.2f}")
-
-with col_rechts:
-    st.subheader("2. Ontvangen (Geld)")
-    st.caption("Hoe is dit bedrag betaald?")
-    
-    bc = st.number_input("Bancontact", min_value=0.0, step=0.01, format="%.2f", key="bc")
-    cash = st.number_input("Cash", min_value=0.0, step=0.01, format="%.2f", key="cash")
-    payq = st.number_input("Payconiq", min_value=0.0, step=0.01, format="%.2f", key="payq")
-    
-    totaal_ontvangen = bc + cash + payq
-    
-    # Lege ruimte voor uitlijning
-    if bedrag_incl_input > 0: st.write("") 
-    
-    st.metric("Totaal Geteld", f"€ {totaal_ontvangen:.2f}")
-
-# --- VALIDATIE ---
-st.markdown("---")
-verschil = round(bedrag_incl_input - totaal_ontvangen, 2)
-
-if bedrag_incl_input > 0:
-    if verschil == 0:
-        st.success("✅ SALDO KLOPT PERFECT")
-        if st.button("💾 Opslaan (Demo)", type="primary", use_container_width=True):
-            st.toast("Opgeslagen!", icon='🎉')
-            time.sleep(1)
-            clear_form()
-            st.rerun()
-    else:
-        st.error(f"⚠️ VERSCHIL: € {verschil:.2f}")
-        st.caption("Het totaal links (Ticket) moet gelijk zijn aan het totaal rechts (Betalingen).")
-        st.button("Corrigeer saldo om op te slaan", disabled=True, use_container_width=True)
-else:
-    st.info("💡 Vul links een bedrag in om te starten.")
+        st.warning("Vul minstens een omzetbedrag in.")
