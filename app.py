@@ -23,9 +23,10 @@ st.markdown("""
 # --- FUNCTIES VOOR INSTELLINGEN (REKENINGSTELSEL) ---
 
 def load_settings():
-    """Laad de Yuki rekeningnummers of maak standaard waarden aan."""
+    """Laad de Yuki rekeningnummers en forceer ze als TEKST."""
     if os.path.exists(SETTINGS_FILE):
-        return pd.read_csv(SETTINGS_FILE)
+        # HIER ZAT DE FOUT: We moeten dtype=str meegeven
+        return pd.read_csv(SETTINGS_FILE, dtype={"Rekening": str, "BtwCode": str})
     else:
         # Standaard instellingen als er nog geen bestand is
         default_data = [
@@ -37,6 +38,8 @@ def load_settings():
             {"Code": "Kruis",    "Label": "Kruisposten (Elek)", "Rekening": "580000", "BtwCode": "", "Type": "Debet"},
         ]
         df = pd.DataFrame(default_data)
+        # Zorg dat het ook bij aanmaken strings zijn
+        df["Rekening"] = df["Rekening"].astype(str)
         df.to_csv(SETTINGS_FILE, index=False)
         return df
 
@@ -47,7 +50,6 @@ def save_settings(df_settings):
 def get_yuki_mapping():
     """Zet de settings tabel om naar een dictionary voor snelle lookup."""
     df = load_settings()
-    # We maken een dict: {'Omzet_21': '700021', ...}
     return dict(zip(df.Code, df.Rekening))
 
 # --- FUNCTIES VOOR DATA ---
@@ -124,17 +126,17 @@ def generate_yuki_export(start_date, end_date):
         datum_fmt = pd.to_datetime(row['Datum']).strftime('%d-%m-%Y')
         desc = row['Omschrijving'] or "Dagontvangst"
         
-        # Credit (Omzet)
-        if row['Omzet_21'] > 0: yuki_rows.append([datum_fmt, CODES["Omzet_21"], f"Omzet 21% - {desc}", f"{-row['Omzet_21']:.2f}".replace('.',','), "V21"])
-        if row['Omzet_12'] > 0: yuki_rows.append([datum_fmt, CODES["Omzet_12"], f"Omzet 12% - {desc}", f"{-row['Omzet_12']:.2f}".replace('.',','), "V12"])
-        if row['Omzet_6'] > 0:  yuki_rows.append([datum_fmt, CODES["Omzet_6"], f"Omzet 6% - {desc}", f"{-row['Omzet_6']:.2f}".replace('.',','), "V6"])
-        if row['Omzet_0'] > 0:  yuki_rows.append([datum_fmt, CODES["Omzet_0"], f"Omzet 0% - {desc}", f"{-row['Omzet_0']:.2f}".replace('.',','), "V0"])
+        # Credit (Omzet) - Let op: we halen de codes nu uit de CODES dict
+        if row['Omzet_21'] > 0: yuki_rows.append([datum_fmt, CODES.get("Omzet_21", "700021"), f"Omzet 21% - {desc}", f"{-row['Omzet_21']:.2f}".replace('.',','), "V21"])
+        if row['Omzet_12'] > 0: yuki_rows.append([datum_fmt, CODES.get("Omzet_12", "700012"), f"Omzet 12% - {desc}", f"{-row['Omzet_12']:.2f}".replace('.',','), "V12"])
+        if row['Omzet_6'] > 0:  yuki_rows.append([datum_fmt, CODES.get("Omzet_6", "700006"), f"Omzet 6% - {desc}", f"{-row['Omzet_6']:.2f}".replace('.',','), "V6"])
+        if row['Omzet_0'] > 0:  yuki_rows.append([datum_fmt, CODES.get("Omzet_0", "700000"), f"Omzet 0% - {desc}", f"{-row['Omzet_0']:.2f}".replace('.',','), "V0"])
             
         # Debet (Betalingen)
-        if row['Geld_Cash'] > 0: yuki_rows.append([datum_fmt, CODES["Kas"], "Ontvangst Cash", f"{row['Geld_Cash']:.2f}".replace('.',','), ""])
+        if row['Geld_Cash'] > 0: yuki_rows.append([datum_fmt, CODES.get("Kas", "570000"), "Ontvangst Cash", f"{row['Geld_Cash']:.2f}".replace('.',','), ""])
         
         tot_elec = row['Geld_Bancontact'] + row['Geld_Payconiq'] + row['Geld_Bonnen']
-        if tot_elec > 0:         yuki_rows.append([datum_fmt, CODES["Kruis"], "Ontvangst Elec.", f"{tot_elec:.2f}".replace('.',','), ""])
+        if tot_elec > 0:         yuki_rows.append([datum_fmt, CODES.get("Kruis", "580000"), "Ontvangst Elec.", f"{tot_elec:.2f}".replace('.',','), ""])
 
     return pd.DataFrame(yuki_rows, columns=["Datum", "Grootboekrekening", "Omschrijving", "Bedrag", "BtwCode"])
 
@@ -155,7 +157,6 @@ with st.sidebar:
     
     if is_admin:
         st.success("🔓 Toegang verleend")
-        # Admin kan kiezen: Invoer, Export OF Instellingen
         app_mode = st.radio("Kies scherm:", ["Invoer", "Export (Yuki)", "Instellingen"])
         
         st.divider()
@@ -182,7 +183,6 @@ with st.sidebar:
 # ==========================================
 
 if app_mode == "Invoer":
-    # --- DEZELFDE INVOERCODE ALS HIERVOOR ---
     st.header("📝 Dagontvangst") 
 
     if st.session_state['show_success_toast']:
@@ -289,17 +289,16 @@ elif app_mode == "Instellingen":
     st.header("⚙️ Rekeningstelsel Configureren")
     st.info("Pas hier de grootboekrekeningen aan voor dit dossier.")
     
-    # Laad de huidige instellingen
     current_settings = load_settings()
     
-    # Toon een editor waar de boekhouder de nummers kan aanpassen
+    # Hier zat de fout, nu is de input gegarandeerd string
     edited_settings = st.data_editor(
         current_settings,
         column_config={
             "Label": st.column_config.TextColumn("Omschrijving", disabled=True),
             "Rekening": st.column_config.TextColumn("Grootboekrekening (Yuki)", required=True),
             "BtwCode": st.column_config.TextColumn("BTW Code", required=False),
-            "Code": None, # Verberg technische ID's
+            "Code": None,
             "Type": None
         },
         hide_index=True,
