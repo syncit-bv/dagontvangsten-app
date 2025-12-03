@@ -4,167 +4,121 @@ from datetime import datetime
 import time
 
 # --- CONFIGURATIE ---
-st.set_page_config(page_title="Kassa Pro", page_icon="💶", layout="wide") 
-# Layout 'wide' geeft meer ademruimte voor de split-view
+st.set_page_config(page_title="Kassa Flow", page_icon="⚡", layout="centered")
 
-# CSS: Maak de headers wat strakker en de metrics groter
+# CSS: Zorgt dat de tabel clean oogt zonder index-nummers
 st.markdown("""
     <style>
-    .stMetric { background-color: #f9f9f9; padding: 15px; border-radius: 5px; border: 1px solid #eee; }
     .block-container { padding-top: 2rem; }
+    [data-testid="stDataFrameResizable"] { border: 1px solid #ddd; border-radius: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- STATE MANAGEMENT ---
-if 'reset_id' not in st.session_state:
-    st.session_state.reset_id = 0
+# --- STATE ---
+if 'reset_count' not in st.session_state:
+    st.session_state.reset_count = 0
 
 def reset_app():
-    st.session_state.reset_id += 1
+    st.session_state.reset_count += 1
     st.session_state.omschrijving = ""
 
 # --- HEADER ---
-c1, c2, c3 = st.columns([1, 2, 2])
+c1, c2 = st.columns([1, 2])
 with c1:
-    st.title("💶 Kassa")
-with c2:
     datum = st.date_input("Datum", datetime.now(), label_visibility="collapsed")
-with c3:
-    omschrijving = st.text_input("Omschrijving", placeholder="Notitie...", label_visibility="collapsed", key="omschrijving")
+with c2:
+    omschrijving = st.text_input("Omschrijving", placeholder="Korte notitie...", label_visibility="collapsed", key="omschrijving")
 
 st.divider()
 
-# --- INPUT SECTIE (LINKS VS RECHTS) ---
-col_L, col_M, col_R = st.columns([4, 1, 4]) 
-# De middelste kolom (1) is voor witruimte/scheiding
+# --- DE DATA STRUCTUUR ---
+# We gebruiken één lijst voor de flow. 
+# TRUC: We voegen een 'Separator' rij toe die puur visueel is.
 
-# --- LINKS: HET TICKET (OMZET) ---
-with col_L:
-    st.subheader("1. Het Ticket (Omzet)")
-    st.caption("Vul de totalen per BTW-tarief in.")
+if 'df_flow' not in st.session_state:
+    # Dit is alleen definitie, de echte startwaarden staan hieronder
+    pass
+
+# We bouwen de dataframe telkens opnieuw op voor de reset
+# De kolom 'Is_Separator' gebruiken we om regels te blokkeren of te kleuren (indien mogelijk)
+# of puur voor onze eigen logica.
+data_items = [
+    # DEEL 1: OMZET
+    {"Label": "🎫 0% (Vrijgesteld)", "Bedrag": 0.00, "Type": "Omzet"},
+    {"Label": "🎫 6% (Voeding)",     "Bedrag": 0.00, "Type": "Omzet"},
+    {"Label": "🎫 12% (Horeca)",     "Bedrag": 0.00, "Type": "Omzet"},
+    {"Label": "🎫 21% (Algemeen)",   "Bedrag": 0.00, "Type": "Omzet"},
     
-    # Startdata vastleggen
-    df_links = pd.DataFrame([
-        {"Categorie": "0% (Vrijgesteld)", "Bedrag": 0.00},
-        {"Categorie": "6% (Voeding)",     "Bedrag": 0.00},
-        {"Categorie": "12% (Horeca)",     "Bedrag": 0.00},
-        {"Categorie": "21% (Algemeen)",   "Bedrag": 0.00},
-    ])
-
-    # De Linker Editor
-    edited_links = st.data_editor(
-        df_links,
-        column_config={
-            "Categorie": st.column_config.TextColumn("Tarief", disabled=True),
-            "Bedrag": st.column_config.NumberColumn(
-                "Bedrag (€)", 
-                min_value=0, 
-                format="%.2f", 
-                required=True
-            )
-        },
-        hide_index=True,
-        use_container_width=True,
-        num_rows="fixed",
-        key=f"grid_links_{st.session_state.reset_id}"
-    )
-
-    # Subtotaal Links (Visueel hulpmiddel)
-    som_links = edited_links["Bedrag"].sum()
-
-
-# --- RECHTS: DE LADE (GELD) ---
-with col_R:
-    st.subheader("2. De Lade (Ontvangst)")
-    st.caption("Vul de getelde bedragen in.")
+    # DE VISUELE PAUZE (Enter drukken om door te gaan)
+    {"Label": "⬇️ --- LADE INHOUD --- ⬇️", "Bedrag": None, "Type": "Separator"},
     
-    # Startdata vastleggen
-    df_rechts = pd.DataFrame([
-        {"Methode": "Bancontact", "Bedrag": 0.00},
-        {"Methode": "Cash",       "Bedrag": 0.00},
-        {"Methode": "Payconiq",   "Bedrag": 0.00},
-    ])
+    # DEEL 2: GELD
+    {"Label": "💶 Bancontact",       "Bedrag": 0.00, "Type": "Geld"},
+    {"Label": "💶 Cash",             "Bedrag": 0.00, "Type": "Geld"},
+    {"Label": "💶 Payconiq",         "Bedrag": 0.00, "Type": "Geld"},
+]
 
-    # De Rechter Editor
-    edited_rechts = st.data_editor(
-        df_rechts,
-        column_config={
-            "Methode": st.column_config.TextColumn("Betaalwijze", disabled=True),
-            "Bedrag": st.column_config.NumberColumn(
-                "Bedrag (€)", 
-                min_value=0, 
-                format="%.2f", 
-                required=True
-            )
-        },
-        hide_index=True,
-        use_container_width=True,
-        num_rows="fixed",
-        key=f"grid_rechts_{st.session_state.reset_id}"
-    )
-    
-    # Subtotaal Rechts
-    som_rechts = edited_rechts["Bedrag"].sum()
+df_start = pd.DataFrame(data_items)
 
+# --- DE SNELE EDITOR ---
+st.info("⚡ **Snelheid:** Typ bedrag ➔ ENTER ➔ Volgende.")
 
-# --- DE VALIDATIE BALK (ONDERAAN) ---
+edited_df = st.data_editor(
+    df_start,
+    column_config={
+        "Label": st.column_config.TextColumn("Omschrijving", disabled=True),
+        "Bedrag": st.column_config.NumberColumn(
+            "Waarde (€)", 
+            min_value=0, 
+            format="%.2f"
+        ),
+        "Type": None # Verberg deze technische kolom
+    },
+    hide_index=True,
+    use_container_width=True,
+    num_rows="fixed",
+    height=320, # Precies hoog genoeg voor alle regels
+    key=f"editor_flow_{st.session_state.reset_count}"
+)
+
+# --- BEREKENINGEN ---
+# We filteren de separator eruit voor de sommen
+regels = edited_df[edited_df["Type"] != "Separator"].copy()
+regels["Bedrag"] = regels["Bedrag"].fillna(0.0) # Zorg dat lege velden 0 zijn
+
+som_omzet = regels[regels["Type"] == "Omzet"]["Bedrag"].sum()
+som_geld = regels[regels["Type"] == "Geld"]["Bedrag"].sum()
+
+verschil = round(som_omzet - som_geld, 2)
+
+# --- STATUS & KNOP ---
 st.divider()
 
-verschil = round(som_links - som_rechts, 2)
-is_valid = (som_links > 0) and (verschil == 0)
+c_info, c_knop = st.columns([1, 1])
 
-# We gebruiken metrics voor een duidelijk dashboard-gevoel
-m1, m2, m3 = st.columns(3)
-
-with m1:
-    st.metric(label="Totaal Ticket", value=f"€ {som_links:.2f}")
-
-with m2:
-    color_diff = "normal"
-    if som_links > 0:
-        if verschil == 0: color_diff = "off" # Grijs/Neutraal als het klopt
-        else: color_diff = "inverse" # Rood als het fout is
-    
-    st.metric(
-        label="Verschil", 
-        value=f"€ {verschil:.2f}", 
-        delta="Klopt niet!" if verschil != 0 and som_links > 0 else "Ok",
-        delta_color=color_diff
-    )
-
-with m3:
-    st.metric(label="Totaal Lade", value=f"€ {som_rechts:.2f}")
-
-# --- DE ACTIE KNOP ---
-# De knop staat gecentreerd onder de totalen
-st.write("") # Witruimte
-c_btn_pad, c_btn_main, c_btn_pad2 = st.columns([1, 2, 1])
-
-with c_btn_main:
-    if is_valid:
-        # GROENE KNOP
-        st.success("✅ De kassa klopt! Je kunt opslaan.")
-        if st.button("💾 Opslaan & Dag Sluiten", type="primary", use_container_width=True):
-            
-            # --- SAVE DATA ---
-            # Hier haal je de data op:
-            # - edited_links (voor BTW uitsplitsing)
-            # - edited_rechts (voor geld uitsplitsing)
-            
-            with st.spinner("Opslaan naar administratie..."):
-                time.sleep(1) # Fake save
-                
-            st.toast("Succesvol opgeslagen!", icon="🎉")
-            time.sleep(1)
-            reset_app()
-            st.rerun()
-            
-    elif som_links == 0:
-        # GRIJZE KNOP (Nog niks ingevuld)
-        st.info("Vul eerst de omzet in aan de linkerkant.")
-        st.button("Wacht op invoer...", disabled=True, use_container_width=True)
-        
+with c_info:
+    if som_omzet == 0:
+        st.caption("Nog geen invoer.")
+    elif verschil == 0:
+        st.markdown(f"### ✅ :green[OK: € {som_omzet:.2f}]")
     else:
-        # RODE KNOP (Fout)
-        st.error(f"⚠️ Er is een kasverschil van € {verschil:.2f}")
-        st.button("⛔ Corrigeer het verschil", disabled=True, use_container_width=True)
+        st.markdown(f"### ❌ :red[Verschil: € {verschil:.2f}]")
+        st.caption(f"Ticket: {som_omzet} | Lade: {som_geld}")
+
+with c_knop:
+    is_valid = (som_omzet > 0) and (verschil == 0)
+    
+    if st.button(
+        "💾 Opslaan & Volgende", 
+        type="primary" if is_valid else "secondary", 
+        disabled=not is_valid, 
+        use_container_width=True
+    ):
+        with st.spinner("Opslaan..."):
+            time.sleep(0.5)
+            # Hier save code...
+        
+        st.toast("Opgeslagen!", icon="✅")
+        time.sleep(1)
+        reset_app()
+        st.rerun()
