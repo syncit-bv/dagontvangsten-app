@@ -6,11 +6,19 @@ import time
 # --- CONFIGURATIE ---
 st.set_page_config(page_title="Kassa Op Maat", page_icon="⚙️", layout="centered")
 
-# CSS: Schone look
+# CSS CORRECTIE:
+# .block-container padding-top staat nu op 4rem (i.p.v. 1rem). 
+# Dit duwt de titel naar beneden zodat hij niet achter de zwarte balk verdwijnt.
 st.markdown("""
     <style>
-    .block-container { padding-top: 1rem; }
-    [data-testid="stDataFrameResizable"] { border: 1px solid #ddd; border-radius: 5px; }
+    .block-container { 
+        padding-top: 4rem; 
+        padding-bottom: 2rem; 
+    }
+    [data-testid="stDataFrameResizable"] { 
+        border: 1px solid #ddd; 
+        border-radius: 5px; 
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -32,7 +40,7 @@ with st.sidebar:
     st.subheader("Welke BTW tarieven?")
     use_0  = st.checkbox("0% (Vrijgesteld)", value=True)
     use_6  = st.checkbox("6% (Voeding/Kranten)", value=True)
-    use_12 = st.checkbox("12% (Horeca)", value=False) # Standaard uit
+    use_12 = st.checkbox("12% (Horeca)", value=False)
     use_21 = st.checkbox("21% (Algemeen)", value=True)
     
     st.divider()
@@ -41,45 +49,45 @@ with st.sidebar:
     use_bc   = st.checkbox("Bancontact", value=True)
     use_cash = st.checkbox("Cash", value=True)
     use_payq = st.checkbox("Payconiq", value=True)
-    use_vouc = st.checkbox("Cadeaubonnen", value=False) # Extra optie
+    use_vouc = st.checkbox("Cadeaubonnen", value=False)
 
 # ==========================================
 # 📅 DE APPLICATIE (HOOFDSCHERM)
 # ==========================================
 
-st.subheader("📅 Dagontvangst")
+st.header("📅 Dagontvangst") 
+# Ik heb subheader veranderd naar header voor net iets meer 'body'
 
 c1, c2 = st.columns([1, 2])
 with c1:
     datum = st.date_input("Datum", datetime.now(), label_visibility="collapsed")
 with c2:
-    omschrijving = st.text_input("Omschrijving", placeholder="Notitie...", label_visibility="collapsed", key="omschrijving")
+    omschrijving = st.text_input("Omschrijving", placeholder="Korte notitie...", label_visibility="collapsed", key="omschrijving")
 
 st.divider()
 
 # --- DATAFRAME BOUWEN OP BASIS VAN INSTELLINGEN ---
 data_items = []
 
-# 1. OMZET REGELS (Dynamisch toegevoegd)
+# 1. OMZET REGELS
 if use_0:  data_items.append({"Label": "🎫 0% (Vrijgesteld)", "Bedrag": 0.00, "Type": "Omzet"})
 if use_6:  data_items.append({"Label": "🎫 6% (Voeding)",     "Bedrag": 0.00, "Type": "Omzet"})
 if use_12: data_items.append({"Label": "🎫 12% (Horeca)",     "Bedrag": 0.00, "Type": "Omzet"})
 if use_21: data_items.append({"Label": "🎫 21% (Algemeen)",   "Bedrag": 0.00, "Type": "Omzet"})
 
-# 2. DE SCHEIDINGSLIJN
+# 2. DE SCHEIDINGSLIJN (Visueel)
 data_items.append({"Label": "⬇️ --- LADE INHOUD --- ⬇️", "Bedrag": None, "Type": "Separator"})
 
-# 3. GELD REGELS (Dynamisch toegevoegd)
+# 3. GELD REGELS
 if use_bc:   data_items.append({"Label": "💳 Bancontact",   "Bedrag": 0.00, "Type": "Geld"})
 if use_cash: data_items.append({"Label": "💶 Cash",         "Bedrag": 0.00, "Type": "Geld"})
 if use_payq: data_items.append({"Label": "📱 Payconiq",     "Bedrag": 0.00, "Type": "Geld"})
 if use_vouc: data_items.append({"Label": "🎁 Bonnen",       "Bedrag": 0.00, "Type": "Geld"})
 
-# Maak dataframe
 df_start = pd.DataFrame(data_items)
 
 # --- DE INPUT TABEL ---
-st.caption("Gebruik **ENTER** om door de actieve velden te springen.")
+st.caption("Typ het bedrag en druk op **ENTER** om naar het volgende veld te springen.")
 
 edited_df = st.data_editor(
     df_start,
@@ -90,12 +98,12 @@ edited_df = st.data_editor(
             min_value=0, 
             format="%.2f"
         ),
-        "Type": None # Verberg technisch veld
+        "Type": None
     },
     hide_index=True,
     use_container_width=True,
     num_rows="fixed",
-    height=(len(data_items) * 35) + 38, # Hoogte past zich automatisch aan!
+    height=(len(data_items) * 35) + 38,
     key=f"editor_dynamic_{st.session_state.reset_count}"
 )
 
@@ -131,10 +139,9 @@ with c_knop:
         disabled=not is_valid, 
         use_container_width=True
     ):
-        # SIMULATIE OPSLAAN
         with st.spinner("Bezig met opslaan..."):
             time.sleep(0.5)
-            # Hier zou je de actieve velden uitlezen en opslaan
+            # DATABASE OPSLAG HIER
         
         st.toast("Opgeslagen!", icon="✅")
         time.sleep(1)
