@@ -1,136 +1,143 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import time
 
 # --- CONFIGURATIE ---
-st.set_page_config(page_title="Kassa Grid", page_icon="⚡", layout="centered")
+st.set_page_config(page_title="Snelle Kassa Invoer", page_icon="⚡", layout="centered")
 
-# --- INITIALISATIE DATA ---
-# We maken de start-tabellen aan in het geheugen als ze er nog niet zijn
-if 'df_omzet' not in st.session_state:
-    # Tabelstructuur voor links
-    data_omzet = {
-        "Categorie": ["0% (Vrijgesteld)", "6%", "12%", "21%"],
-        "Bedrag": [0.00, 0.00, 0.00, 0.00]
-    }
-    st.session_state.df_omzet = pd.DataFrame(data_omzet)
+# --- CSS HACK VOOR SCHONE LOOK ---
+# Dit verwijdert onnodige witruimte bovenaan zodat de app direct begint
+st.markdown("""
+    <style>
+    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
+    </style>
+    """, unsafe_allow_html=True)
 
-if 'df_geld' not in st.session_state:
-    # Tabelstructuur voor rechts
-    data_geld = {
-        "Betaalwijze": ["Bancontact", "Cash", "Payconiq"],
-        "Ontvangen": [0.00, 0.00, 0.00]
-    }
-    st.session_state.df_geld = pd.DataFrame(data_geld)
+# --- STATE MANAGEMENT ---
+# We gebruiken een teller om de tabellen te 'resetten' na opslaan
+if 'reset_counter' not in st.session_state:
+    st.session_state.reset_counter = 0
 
-if 'reset_trigger' not in st.session_state:
-    st.session_state.reset_trigger = 0
-
-# Functie om alles te wissen na opslaan
-def reset_data():
-    st.session_state.df_omzet["Bedrag"] = 0.00
-    st.session_state.df_geld["Ontvangen"] = 0.00
+def reset_app():
+    st.session_state.reset_counter += 1
     st.session_state.omschrijving = ""
-    st.session_state.reset_trigger += 1 # Forceer een herlading van de editors
 
-# --- TITEL & DATUM ---
-st.title("⚡ Snelle Invoer (Grid)")
-st.caption("Klik op een bedrag, typ het getal en druk op ENTER om naar beneden te springen.")
+# --- DATUM & OMSCHRIJVING ---
+st.subheader("📅 Dagontvangst Registreren")
 
 c1, c2 = st.columns([1, 2])
 with c1:
-    datum = st.date_input("Datum", datetime.now())
+    datum = st.date_input("Datum", datetime.now(), label_visibility="collapsed")
 with c2:
-    omschrijving = st.text_input("Omschrijving", key="omschrijving")
+    omschrijving = st.text_input("Omschrijving", placeholder="Bijv. Dagtotaal winkel", label_visibility="collapsed", key="omschrijving")
 
-st.markdown("---")
+st.divider()
 
-# --- DE GRIDS (DATA EDITORS) ---
+# --- DE DATA GRID ---
 col_links, col_rechts = st.columns(2)
 
+# Unieke keys zorgen dat de tabellen leeg gemaakt kunnen worden
+key_omzet = f"grid_omzet_{st.session_state.reset_counter}"
+key_geld = f"grid_geld_{st.session_state.reset_counter}"
+
 with col_links:
-    st.subheader("1. Omzet")
-    # De data editor: num_rows="fixed" zorgt dat je geen regels kan toevoegen/wissen
-    # key=... zorgt voor de state management
+    st.markdown("**1. TICKET (Omzet)**")
+    
+    # Startdata: Van 0% naar 21%
+    df_omzet_start = pd.DataFrame({
+        "Tarief": ["0% (Vrijgesteld)", "6% (Voeding)", "12% (Horeca)", "21% (Algemeen)"],
+        "Bedrag": [0.00, 0.00, 0.00, 0.00]
+    })
+
     edited_omzet = st.data_editor(
-        st.session_state.df_omzet,
+        df_omzet_start,
         column_config={
-            "Categorie": st.column_config.TextColumn("BTW Tarief", disabled=True), # Read-only
-            "Bedrag": st.column_config.NumberColumn(
-                "Bedrag (€)", 
-                min_value=0, 
-                format="%.2f",
-                required=True
-            )
+            "Tarief": st.column_config.TextColumn("Categorie", disabled=True),
+            "Bedrag": st.column_config.NumberColumn("Bedrag (€)", min_value=0, format="%.2f", required=True)
         },
         hide_index=True,
         use_container_width=True,
-        num_rows="fixed",
-        key=f"editor_omzet_{st.session_state.reset_trigger}"
+        num_rows="fixed", # Geen regels toevoegen
+        key=key_omzet
     )
 
 with col_rechts:
-    st.subheader("2. Betalingen")
+    st.markdown("**2. LADE (Geld)**")
+    
+    df_geld_start = pd.DataFrame({
+        "Methode": ["Bancontact", "Cash", "Payconiq"],
+        "Ontvangen": [0.00, 0.00, 0.00]
+    })
+
     edited_geld = st.data_editor(
-        st.session_state.df_geld,
+        df_geld_start,
         column_config={
-            "Betaalwijze": st.column_config.TextColumn("Methode", disabled=True),
-            "Ontvangen": st.column_config.NumberColumn(
-                "Bedrag (€)", 
-                min_value=0, 
-                format="%.2f",
-                required=True
-            )
+            "Methode": st.column_config.TextColumn("Betaalwijze", disabled=True),
+            "Ontvangen": st.column_config.NumberColumn("Bedrag (€)", min_value=0, format="%.2f", required=True)
         },
         hide_index=True,
         use_container_width=True,
         num_rows="fixed",
-        key=f"editor_geld_{st.session_state.reset_trigger}"
+        key=key_geld
     )
 
-# --- BEREKENINGEN ---
-# We trekken de totalen direct uit de bewerkte tabellen
+# --- LIVE BEREKENING ---
 totaal_omzet = edited_omzet["Bedrag"].sum()
-totaal_betaald = edited_geld["Ontvangen"].sum()
-verschil = round(totaal_omzet - totaal_betaald, 2)
+totaal_geld = edited_geld["Ontvangen"].sum()
+verschil = round(totaal_omzet - totaal_geld, 2)
 
-# Voor het opslaan moeten we de specifieke waarden er weer uitvissen
-# Dit is handig voor je latere export
-vals_omzet = edited_omzet.set_index("Categorie")["Bedrag"]
-vals_geld = edited_geld.set_index("Betaalwijze")["Ontvangen"]
+# --- VALIDATIE BALK ---
+st.divider()
 
-st.markdown("---")
+# Container voor de status
+status_container = st.container()
 
-# --- STATUS & KNOP ---
-c_tot1, c_tot2, c_stat = st.columns([1, 1, 2])
-
-with c_tot1:
-    st.metric("Totaal Ticket", f"€ {totaal_omzet:.2f}")
-with c_tot2:
-    st.metric("Totaal Geld", f"€ {totaal_betaald:.2f}")
-
-with c_stat:
-    is_valid = (totaal_omzet > 0) and (verschil == 0)
+with status_container:
+    c_res1, c_res2, c_actie = st.columns([1, 1, 2])
     
-    if is_valid:
-        st.success("✅ Klaar!")
-        if st.button("💾 Opslaan & Reset", type="primary", use_container_width=True):
-            # HIER KOMT DE SAVE LOGICA
-            # Bijvoorbeeld:
-            # save_row = {
-            #    "Datum": datum,
-            #    "Omzet_21": vals_omzet["21%"],
-            #    "Cash": vals_geld["Cash"],
-            #    ...
-            # }
+    with c_res1:
+        st.metric("Totaal Ticket", f"€ {totaal_omzet:.2f}")
+    with c_res2:
+        st.metric("Totaal Geld", f"€ {totaal_geld:.2f}")
+    
+    with c_actie:
+        # Validatie Logica
+        if totaal_omzet == 0 and totaal_geld == 0:
+             st.info("👆 Vul de gegevens hierboven in.")
+             knop_text = "Nog geen gegevens"
+             knop_type = "secondary"
+             is_active = False
+             
+        elif verschil == 0:
+            st.success("✅ Saldo klopt perfect!")
+            knop_text = "💾 Opslaan & Dag Sluiten"
+            knop_type = "primary" # Maakt de knop rood/opvallend in Streamlit thema
+            is_active = True
             
+        else:
+            st.error(f"⚠️ Verschil: € {verschil:.2f}")
+            knop_text = "⛔ Corrigeer saldo"
+            knop_type = "secondary"
+            is_active = False
+
+        # De Knop
+        if st.button(knop_text, type=knop_type, disabled=not is_active, use_container_width=True):
+            
+            # --- HIER KOMT DE SAVE LOGICA ---
+            # Nu simuleren we het even:
+            with st.spinner("Bezig met opslaan naar Database..."):
+                time.sleep(1) # Fake save tijd
+                
+                # Hier halen we de data uit de grid voor de export later
+                # export_data = {
+                #    "datum": datum,
+                #    "omzet_21": edited_omzet.iloc[3]['Bedrag'],
+                #    "cash": edited_geld.iloc[1]['Ontvangen'],
+                #    ...
+                # }
+                
             st.toast("Succesvol opgeslagen!", icon="🎉")
             time.sleep(1)
-            reset_data()
+            reset_app()
             st.rerun()
-    else:
-        if totaal_omzet == 0:
-            st.info("Vul bedragen in...")
-        else:
-            st.error(f"❌ Verschil: € {verschil:.2f}")
-            st.button("Correctie nodig", disabled=True, use_container_width=True)
