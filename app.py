@@ -20,40 +20,85 @@ ADMIN_PASSWORD = "Yuki2025!"
 
 st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="centered")
 
-# --- CSS STYLING (GECORRIGEERD) ---
+# --- CSS STYLING (NIVEAU 2: MODERN & CARDS) ---
 st.markdown("""
     <style>
-    /* 1. Header en Menu ZICHTBAAR houden, maar achtergrond transparant */
+    /* 1. Header Transparant (Menu blijft zichtbaar) */
     header[data-testid="stHeader"] {
         background-color: transparent !important;
     }
     
-    /* Verberg de gekleurde 'running' streep bovenaan voor cleanere look */
-    [data-testid="stDecoration"] {
-        display: none;
-    }
+    /* Verberg de gekleurde balk bovenaan */
+    [data-testid="stDecoration"] { display: none; }
 
-    /* 2. Inhoud naar beneden duwen zodat het niet achter de menuknop staat */
+    /* 2. Inhoud ruimte geven */
     .block-container { 
         padding-top: 3.5rem !important; 
         padding-bottom: 2rem; 
     }
     
-    /* 3. Info Kaarten Styling */
+    /* 3. MODERNE INFO KAARTEN */
     .info-card {
-        height: 50px; display: flex; align-items: center; justify-content: center;
-        border-radius: 8px; font-weight: bold; font-size: 0.95rem; margin-bottom: 10px;
-        border: 1px solid rgba(49, 51, 63, 0.1);
+        background-color: white;
+        padding: 12px;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05); /* Zachte schaduw */
+        text-align: center;
+        margin-bottom: 10px;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        border-left: 5px solid #ddd; /* Standaard rand */
+        border: 1px solid rgba(0,0,0,0.05);
+        border-left-width: 5px;
+        font-weight: 700;
+        font-size: 0.95rem;
+        height: 55px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
     }
-    .card-red   { background-color: #fce8e6; color: #a30f0f; }
-    .card-green { background-color: #e6fcf5; color: #0f5132; }
-    .card-grey  { background-color: #f0f2f6; color: #31333f; }
-    .card-blue  { background-color: #e7f5ff; color: #004085; }
     
-    .day-header { text-align: center; font-size: 1.3rem; font-weight: 700; margin-bottom: 0px; color: #31333f; }
-    .sub-status { text-align: center; font-size: 0.85rem; margin-bottom: 5px; }
+    .info-card:hover {
+        transform: translateY(-2px); /* Zweef effect */
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    /* Kleurvarianten voor de linker rand en tekst */
+    .card-red   { border-left-color: #d32f2f; color: #c62828; background-color: #fff5f5; }
+    .card-green { border-left-color: #2e7d32; color: #1b5e20; background-color: #f1f8e9; }
+    .card-grey  { border-left-color: #757575; color: #424242; background-color: #ffffff; }
+    .card-blue  { border-left-color: #1976d2; color: #0d47a1; background-color: #e3f2fd; }
     
-    div.stButton > button { width: 100%; }
+    /* 4. Typografie voor de Datum */
+    .day-header { 
+        font-family: 'Helvetica Neue', sans-serif;
+        text-align: center; 
+        font-size: 1.8rem; 
+        font-weight: 800; 
+        color: #1f2937;
+        letter-spacing: -0.5px;
+        margin-bottom: 0px; 
+        text-transform: uppercase;
+    }
+    
+    .sub-status { 
+        text-align: center; 
+        font-size: 0.85rem; 
+        font-weight: 600;
+        margin-bottom: 10px; 
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+    
+    /* 5. Knoppen styling */
+    div.stButton > button { 
+        width: 100%; 
+        border-radius: 8px;
+        font-weight: 600;
+        height: 3em;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        border: 1px solid #e0e0e0;
+    }
+    
     div[data-testid="stDateInput"] { text-align: center; }
     .streamlit-expanderHeader { background-color: #f8f9fa; border-radius: 5px; }
     </style>
@@ -88,7 +133,7 @@ def load_settings():
     if os.path.exists(SETTINGS_FILE):
         df = pd.read_csv(SETTINGS_FILE, dtype={"Rekening": str, "BtwCode": str})
         
-        # MIGRATE: Voeg ExportDesc toe als die mist (oude versies updaten)
+        # MIGRATE: Voeg ExportDesc toe als die mist
         if "ExportDesc" not in df.columns:
             st.toast("Instellingen bijgewerkt: Kolom 'Omschrijving' toegevoegd", icon="🛠️")
             df["ExportDesc"] = df["Label"] # Default
@@ -120,13 +165,12 @@ def get_yuki_mapping():
         mapping[row['Code']] = {
             'Rekening': row['Rekening'],
             'Label': row['Label'],
-            'Template': row.get('ExportDesc', row['Label']) # Omschrijving template
+            'Template': row.get('ExportDesc', row['Label']) 
         }
     return mapping
 
 # --- EXPORT CONFIG ---
 def get_default_export_config():
-    # Naam tegenrekening wijst nu standaard naar 'Label'
     return [
         {"Kolom": "Grootboekrekening kas", "Bron": "Vast", "Waarde": "570000"},
         {"Kolom": "Kas omschrijving",      "Bron": "Vast", "Waarde": "Dagontvangsten"},
@@ -144,7 +188,6 @@ def get_default_export_config():
 def load_export_config():
     if os.path.exists(EXPORT_CONFIG_FILE):
         df = pd.read_csv(EXPORT_CONFIG_FILE)
-        # Verwijder oude BTW Code kolom uit config indien aanwezig
         if "BTW Code" in df["Kolom"].values:
             df = df[df["Kolom"] != "BTW Code"]
             df.to_csv(EXPORT_CONFIG_FILE, index=False)
@@ -223,7 +266,7 @@ def handle_save_click(datum, omschrijving, edited_df, som_omzet, som_geld, versc
     st.session_state.omschrijving = "" 
     st.session_state['show_success_toast'] = True
 
-# --- DYNAMISCHE EXPORT ENGINE (MET VARIABELEN) ---
+# --- DYNAMISCHE EXPORT ENGINE ---
 
 def generate_flexible_export(start_date, end_date):
     df_data = load_database()
@@ -258,15 +301,10 @@ def generate_flexible_export(start_date, end_date):
             final_desc = final_desc.replace("&label&", label)
             final_desc = final_desc.replace("&notitie&", desc_user)
             
-            # Fallback
             if not final_desc: final_desc = f"{label} {datum_fmt}"
 
             transactions.append({
-                "Rek": rekening, 
-                "Bedrag": bedrag, 
-                "Btw": btw, 
-                "Desc": final_desc, 
-                "Label": label
+                "Rek": rekening, "Bedrag": bedrag, "Btw": btw, "Desc": final_desc, "Label": label
             })
 
         # OMZET
@@ -295,8 +333,8 @@ def generate_flexible_export(start_date, end_date):
                     final_val = val_key if val_key and str(val_key) != "nan" else ""
                 elif source == "Veld":
                     if val_key == "Datum": final_val = datum_fmt
-                    elif val_key == "Omschrijving": final_val = t['Desc'] # Geformatteerde tekst
-                    elif val_key == "Label": final_val = t['Label']       # Puur label (voor Tegenrekening naam)
+                    elif val_key == "Omschrijving": final_val = t['Desc'] 
+                    elif val_key == "Label": final_val = t['Label']       
                     elif val_key == "Bedrag": final_val = f"{-t['Bedrag']:.2f}".replace('.',',')
                     elif val_key == "Grootboekrekening": final_val = t['Rek']
                     elif val_key == "BtwCode": final_val = t['Btw']
