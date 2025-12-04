@@ -6,76 +6,35 @@ import os
 import locale
 import calendar
 import json
-import gspread
-from google.oauth2.service_account import Credentials
 
 # Probeer NL instellingen
 try: locale.setlocale(locale.LC_TIME, 'nl_NL.UTF-8')
 except: pass
 
 # --- CONFIGURATIE ---
-# LET OP: Zorg dat je secrets goed staan in .streamlit/secrets.toml of op Streamlit Cloud
-# SHEET_URL = st.secrets["sheet_url"] 
-# Voor lokaal gebruik (als je nog geen secrets hebt) kan je dit hardcoden, maar voor Cloud gebruik je secrets.
-# Hieronder ga ik ervan uit dat de secrets aanwezig zijn zoals eerder besproken.
-
-try:
-    SHEET_URL = st.secrets["sheet_url"]
-except:
-    st.error("Geen 'sheet_url' gevonden in secrets. Configureer dit eerst.")
-    st.stop()
-
+DATA_FILE = "kassa_historiek.csv"
+SETTINGS_FILE = "kassa_settings.csv"
+EXPORT_CONFIG_FILE = "export_config.csv"
+CONFIG_FILE = "kassa_config.json"
 ADMIN_PASSWORD = "Yuki2025!" 
 
 st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="centered")
 
-# --- GOOGLE SHEETS CONNECTIE ---
-@st.cache_resource
-def get_google_sheet():
-    creds_dict = dict(st.secrets["gcp_service_account"])
-    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    client = gspread.authorize(creds)
-    return client.open_by_url(SHEET_URL)
-
-def get_worksheet_data(worksheet_name):
-    sh = get_google_sheet()
-    try:
-        ws = sh.worksheet(worksheet_name)
-        data = ws.get_all_records()
-        if not data: return pd.DataFrame()
-        # Zorg dat lege strings NaN worden en conversie types
-        df = pd.DataFrame(data)
-        return df
-    except gspread.WorksheetNotFound:
-        sh.add_worksheet(title=worksheet_name, rows=1000, cols=20)
-        return pd.DataFrame()
-
-def save_dataframe_to_sheet(df, worksheet_name):
-    sh = get_google_sheet()
-    try: ws = sh.worksheet(worksheet_name)
-    except: ws = sh.add_worksheet(title=worksheet_name, rows=1000, cols=20)
-    ws.clear()
-    # Headers en data schrijven. Convert types naar string/json safe indien nodig voor gspread
-    # Gspread update verwacht strings of ints, geen Pandas NaNs.
-    df_clean = df.fillna("")
-    ws.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
-
 # --- CSS STYLING ---
 st.markdown("""
     <style>
-    /* 1. Header Transparant */
+    /* Header transparant maken */
     header[data-testid="stHeader"] {
         background-color: transparent !important;
     }
     
-    /* 2. Inhoud naar beneden */
+    /* Inhoud omhoog trekken */
     .block-container { 
         padding-top: 3.5rem !important; 
         padding-bottom: 2rem; 
     }
     
-    /* 3. Info Kaarten */
+    /* Info Kaarten */
     .info-card {
         height: 50px; display: flex; align-items: center; justify-content: center;
         border-radius: 8px; font-weight: bold; font-size: 0.95rem; margin-bottom: 10px;
@@ -98,13 +57,13 @@ st.markdown("""
 # --- FUNCTIES: CONFIG & SETTINGS ---
 
 def load_config():
-    df = get_worksheet_data("Config")
-    if df.empty: return {"start_saldo": 0.0}
-    return df.iloc[0].to_dict()
+    default_config = {"start_saldo": 0.0, "laatste_update": str(datetime.now().date())}
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, "r") as f: return json.load(f)
+    return default_config
 
-def save_config_sheet(new_saldo):
-    df = pd.DataFrame([{"start_saldo": new_saldo, "laatste_update": str(datetime.now())}])
-    save_dataframe_to_sheet(df, "Config")
+def save_config(config_data):
+    with open(CONFIG_FILE, "w") as f: json.dump(config_data, f)
 
 def get_default_settings():
     return [
@@ -121,37 +80,35 @@ def get_default_settings():
     ]
 
 def load_settings():
-    df = get_worksheet_data("Instellingen")
-    if df.empty:
-        df = pd.DataFrame(get_default_settings())
-        save_dataframe_to_sheet(df, "Instellingen")
-    
-    # Zorg dat types strings zijn
-    df = df.astype(str)
-    
-    # Auto-migratie logica (indien nieuwe kolommen ontbreken)
-    changes = False
-    if "ExportDesc" not in df.columns:
-        df["ExportDesc"] = df["Label"]
-        changes = True
-    
-    # Check voor nieuwe rijen
-    defaults = pd.DataFrame(get_default_settings())
-    existing_codes = df["Code"].tolist()
-    for code in ["Oversch", "Afstorting"]:
-        if code not in existing_codes:
-            row = defaults[defaults["Code"] == code].iloc[0]
-            df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-            changes = True
-            
-    if changes:
-        save_dataframe_to_sheet(df, "Instellingen")
+    if os.path.exists(SETTINGS_FILE):
+        df = pd.read_csv(SETTINGS_FILE, dtype={"Rekening": str, "BtwCode": str})
         
-    return df
+        # MIGRATE: Voeg ExportDesc toe als die mist
+        if "ExportDesc" not in df.columns:
+            st.toast("Instellingen bijgewerkt: Kolom 'Omschrijving' toegevoegd", icon="🛠️")
+            df["ExportDesc"] = df["Label"] # Default
+            df.to_csv(SETTINGS_FILE, index=False)
+            
+        if "Kas" in df["Code"].values:
+            df.loc[df["Code"] == "Kas", "Code"] = "Cash"
+            df.to_csv(SETTINGS_FILE, index=False)
+            
+        defaults = pd.DataFrame(get_default_settings())
+        existing_codes = df["Code"].tolist()
+        for code in ["Oversch", "Afstorting"]:
+            if code not in existing_codes:
+                row = defaults[defaults["Code"] == code].iloc[0]
+                df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+                df.to_csv(SETTINGS_FILE, index=False)
+                
+        return df
+    else:
+        df = pd.DataFrame(get_default_settings())
+        df["Rekening"] = df["Rekening"].astype(str)
+        df.to_csv(SETTINGS_FILE, index=False)
+        return df
 
-def save_settings(df_settings):
-    save_dataframe_to_sheet(df_settings, "Instellingen")
-
+def save_settings(df_settings): df_settings.to_csv(SETTINGS_FILE, index=False)
 def get_yuki_mapping():
     df = load_settings()
     mapping = {}
@@ -180,39 +137,30 @@ def get_default_export_config():
     ]
 
 def load_export_config():
-    df = get_worksheet_data("ExportConfig")
-    if df.empty:
+    if os.path.exists(EXPORT_CONFIG_FILE):
+        df = pd.read_csv(EXPORT_CONFIG_FILE)
+        if "BTW Code" in df["Kolom"].values:
+            df = df[df["Kolom"] != "BTW Code"]
+            df.to_csv(EXPORT_CONFIG_FILE, index=False)
+        return df
+    else:
         df = pd.DataFrame(get_default_export_config())
-        save_dataframe_to_sheet(df, "ExportConfig")
-    
-    # Check oude BTW kolom
-    if "BTW Code" in df["Kolom"].values:
-        df = df[df["Kolom"] != "BTW Code"]
-        save_dataframe_to_sheet(df, "ExportConfig")
-        
-    return df
+        df.to_csv(EXPORT_CONFIG_FILE, index=False)
+        return df
 
-def save_export_config(df):
-    save_dataframe_to_sheet(df, "ExportConfig")
+def save_export_config(df): df.to_csv(EXPORT_CONFIG_FILE, index=False)
 
 # --- DATA ---
 def load_database():
-    df = get_worksheet_data("Historiek")
-    if df.empty:
-        return pd.DataFrame(columns=["Datum", "Omschrijving", "Totaal_Omzet", "Totaal_Geld", "Verschil", 
-                                     "Omzet_0", "Omzet_6", "Omzet_12", "Omzet_21", 
-                                     "Geld_Bancontact", "Geld_Cash", "Geld_Payconiq", "Geld_Overschrijving", 
-                                     "Geld_Bonnen", "Geld_Afstorting", "Timestamp"])
-    
-    # Numerieke kolommen forceren
-    cols = ["Totaal_Omzet", "Totaal_Geld", "Verschil", "Omzet_0", "Omzet_6", "Omzet_12", "Omzet_21",
-            "Geld_Bancontact", "Geld_Cash", "Geld_Payconiq", "Geld_Overschrijving", "Geld_Bonnen", "Geld_Afstorting"]
-    
-    for c in cols:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0.0)
-            
-    return df
+    if os.path.exists(DATA_FILE):
+        df = pd.read_csv(DATA_FILE)
+        df = df.fillna("") 
+        for col in ["Geld_Overschrijving", "Geld_Afstorting"]:
+            if col not in df.columns: df[col] = 0.0
+        return df
+    else:
+        cols = ["Datum", "Omschrijving", "Totaal_Omzet", "Totaal_Geld", "Verschil", "Omzet_0", "Omzet_6", "Omzet_12", "Omzet_21", "Geld_Bancontact", "Geld_Cash", "Geld_Payconiq", "Geld_Overschrijving", "Geld_Bonnen", "Geld_Afstorting", "Timestamp"]
+        return pd.DataFrame(columns=cols)
 
 def get_data_by_date(datum_obj):
     df = load_database()
@@ -224,21 +172,14 @@ def calculate_current_saldo(target_date):
     start = float(config.get("start_saldo", 0.0))
     df = load_database()
     if df.empty: return start
-    
-    # Datum conversie voor vergelijking
     df['DatumDT'] = pd.to_datetime(df['Datum'])
-    target_dt = pd.to_datetime(target_date)
-    
-    hist = df[df['DatumDT'] < target_dt]
+    hist = df[df['DatumDT'] < pd.to_datetime(target_date)]
     return start + hist['Geld_Cash'].sum() - hist['Geld_Afstorting'].sum()
 
 def save_transaction(datum, omschrijving, df_input, totaal_omzet, totaal_geld, verschil):
     df_db = load_database()
     datum_str = str(datum)
-    
-    # Oude data verwijderen (filteren)
-    if not df_db.empty:
-        df_db = df_db[df_db['Datum'] != datum_str]
+    df_db = df_db[df_db['Datum'] != datum_str]
     
     if df_input is None: df_input = pd.DataFrame(columns=['Label', 'Bedrag'])
     if not omschrijving or omschrijving.strip() == "" or omschrijving == "nan":
@@ -250,7 +191,6 @@ def save_transaction(datum, omschrijving, df_input, totaal_omzet, totaal_geld, v
         "Omzet_0": 0.0, "Omzet_6": 0.0, "Omzet_12": 0.0, "Omzet_21": 0.0,
         "Geld_Bancontact": 0.0, "Geld_Cash": 0.0, "Geld_Payconiq": 0.0, "Geld_Overschrijving": 0.0, "Geld_Bonnen": 0.0, "Geld_Afstorting": 0.0
     }
-    
     for index, row in df_input.iterrows():
         label = row['Label']
         bedrag = row['Bedrag']
@@ -265,17 +205,14 @@ def save_transaction(datum, omschrijving, df_input, totaal_omzet, totaal_geld, v
             elif "Overschrijving" in label: new_row["Geld_Overschrijving"] = bedrag
             elif "Bonnen" in label: new_row["Geld_Bonnen"] = bedrag
             elif "Afstorting" in label: new_row["Geld_Afstorting"] = bedrag
-            
     new_entry_df = pd.DataFrame([new_row])
-    df_final = pd.concat([df_db, new_entry_df], ignore_index=True)
-    df_final = df_final.sort_values(by="Datum", ascending=False)
-    
-    # Opslaan naar GSheets
-    save_dataframe_to_sheet(df_final, "Historiek")
+    df_db = pd.concat([df_db, new_entry_df], ignore_index=True)
+    df_db = df_db.sort_values(by="Datum", ascending=False)
+    if 'DatumDT' in df_db.columns: del df_db['DatumDT']
+    df_db.to_csv(DATA_FILE, index=False)
 
 def handle_save_click(datum, omschrijving, edited_df, som_omzet, som_geld, verschil):
-    with st.spinner("Bezig met opslaan..."):
-        save_transaction(datum, omschrijving, edited_df, som_omzet, som_geld, verschil)
+    save_transaction(datum, omschrijving, edited_df, som_omzet, som_geld, verschil)
     st.session_state.reset_count += 1
     st.session_state.omschrijving = "" 
     st.session_state['show_success_toast'] = True
@@ -289,8 +226,6 @@ def generate_flexible_export(start_date, end_date):
     
     mask = (df_data['Datum'] >= str(start_date)) & (df_data['Datum'] <= str(end_date))
     selection = df_data.loc[mask]
-    
-    # Sorteer oplopend (Oud naar Nieuw)
     selection = selection.sort_values(by="Datum", ascending=True)
     
     if selection.empty: return None
@@ -311,7 +246,7 @@ def generate_flexible_export(start_date, end_date):
             label = info.get('Label', code_key)
             template = info.get('Template', '')
             
-            # Template invullen
+            # VARIABELEN VERVANGEN
             final_desc = template.replace("&datum&", datum_fmt)
             final_desc = final_desc.replace("&notitie&", desc_user)
             if not final_desc: final_desc = f"{label} {datum_fmt}"
@@ -384,6 +319,9 @@ with st.sidebar:
     if is_admin:
         st.success("🔓 Admin")
         app_mode = st.radio("Ga naar:", ["Invoer", "Export (Yuki)", "Instellingen", "Export Configuratie", "Kassaldo Beheer"])
+        st.divider()
+        if os.path.exists(DATA_FILE):
+             with open(DATA_FILE, "rb") as f: st.download_button("📥 Backup", f, "backup.csv", "text/csv")
     st.divider()
     if app_mode == "Invoer":
         st.subheader("Profiel")
@@ -410,12 +348,12 @@ with st.sidebar:
 
 if app_mode == "Invoer":
     if st.session_state['show_success_toast']:
-        st.toast("Opgeslagen in Google Sheets!", icon="✅")
+        st.toast("Opgeslagen!", icon="✅")
         st.session_state['show_success_toast'] = False
     
     datum_geselecteerd = st.session_state.date_picker_val
     
-    # --- HEADER ---
+    # Header & Status
     check_data = get_data_by_date(datum_geselecteerd)
     openings_saldo = calculate_current_saldo(datum_geselecteerd)
     
@@ -448,7 +386,7 @@ if app_mode == "Invoer":
 
     st.divider()
 
-    # --- INVOER ---
+    # Invoer
     if datum_geselecteerd > datetime.now().date(): st.info("Toekomst.")
     else:
         existing_data = get_data_by_date(datum_geselecteerd)
@@ -555,7 +493,7 @@ elif app_mode == "Kassaldo Beheer":
     new_start = st.number_input("Startsaldo", value=float(curr_start), step=10.0, format="%.2f")
     if st.button("💾 Opslaan"):
         config["start_saldo"] = new_start
-        save_config_sheet(new_start) # Opslaan in GSheet config tab
+        save_config(config)
         st.success("Opgeslagen!")
 
 elif app_mode == "Export (Yuki)":
@@ -568,7 +506,6 @@ elif app_mode == "Export (Yuki)":
         if yuki_df is not None:
             st.success(f"{len(yuki_df)} regels.")
             st.dataframe(yuki_df, hide_index=True)
-            # UTF-8-SIG voor Excel compatibiliteit
             csv = yuki_df.to_csv(sep=';', index=False).encode('utf-8-sig')
             st.download_button("Download", csv, "export.csv", "text/csv")
         else: st.warning("Geen data.")
@@ -580,7 +517,7 @@ elif app_mode == "Export Configuratie":
     internal_fields = ["Datum", "Omschrijving", "Bedrag", "Grootboekrekening", "BtwCode", "Label"]
     edited_export = st.data_editor(current_export_config, column_config={"Kolom": st.column_config.TextColumn("CSV Kolom", required=True), "Bron": st.column_config.SelectboxColumn("Type", options=source_options), "Waarde": st.column_config.TextColumn("Waarde")}, num_rows="dynamic", use_container_width=True, hide_index=True)
     if st.button("💾 Opslaan", type="primary"):
-        save_dataframe_to_sheet(edited_export, "ExportConfig")
+        save_export_config(edited_export)
         st.success("Opgeslagen!")
 
 elif app_mode == "Instellingen":
@@ -594,7 +531,7 @@ elif app_mode == "Instellingen":
             "Code": None, 
             "Label": st.column_config.TextColumn("Type", disabled=True),
             "Rekening": st.column_config.TextColumn("Yuki Rekening"),
-            "ExportDesc": st.column_config.TextColumn("Export Omschrijving"),
+            "ExportDesc": st.column_config.TextColumn("Omschrijving Template"),
             "BtwCode": st.column_config.TextColumn("BTW Code"),
             "Type": None
         },
@@ -602,5 +539,5 @@ elif app_mode == "Instellingen":
     )
     
     if st.button("Opslaan", type="primary"):
-        save_dataframe_to_sheet(edited_settings, "Instellingen")
+        save_settings(edited_settings)
         st.success("Opgeslagen!")
