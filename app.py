@@ -14,7 +14,7 @@ except: pass
 # --- CONFIGURATIE ---
 DATA_FILE = "kassa_historiek.csv"
 SETTINGS_FILE = "kassa_settings.csv"
-CONFIG_FILE = "kassa_config.json" # Nieuw: voor het startsaldo
+CONFIG_FILE = "kassa_config.json"
 ADMIN_PASSWORD = "Yuki2025!" 
 
 st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="centered")
@@ -38,10 +38,9 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNCTIES: CONFIGURATIE (STARTSALDO) ---
+# --- FUNCTIES: CONFIGURATIE ---
 
 def load_config():
-    """Laad globale instellingen zoals startsaldo."""
     default_config = {"start_saldo": 0.0, "laatste_update": str(datetime.now().date())}
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r") as f:
@@ -63,9 +62,9 @@ def get_default_settings():
         {"Code": "Kas",        "Label": "Kas (Cash)",      "Rekening": "570000", "BtwCode": "",    "Type": "Debet"},
         {"Code": "Bancontact", "Label": "Bancontact",      "Rekening": "580000", "BtwCode": "",    "Type": "Debet"},
         {"Code": "Payconiq",   "Label": "Payconiq",        "Rekening": "580000", "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Oversch",    "Label": "Overschrijving",  "Rekening": "580000", "BtwCode": "",    "Type": "Debet"}, # NIEUW
+        {"Code": "Oversch",    "Label": "Overschrijving",  "Rekening": "580000", "BtwCode": "",    "Type": "Debet"},
         {"Code": "Bonnen",     "Label": "Cadeaubonnen",    "Rekening": "440000", "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Afstorting", "Label": "Afstorting Bank", "Rekening": "550000", "BtwCode": "",    "Type": "Credit"}, # NIEUW
+        {"Code": "Afstorting", "Label": "Afstorting Bank", "Rekening": "550000", "BtwCode": "",    "Type": "Credit"},
     ]
 
 def load_settings():
@@ -84,17 +83,14 @@ def get_yuki_mapping():
     df = load_settings()
     return dict(zip(df.Code, df.Rekening))
 
-# --- FUNCTIES: DATA & SALDO ---
+# --- FUNCTIES: DATA ---
 
 def load_database():
     if os.path.exists(DATA_FILE):
         df = pd.read_csv(DATA_FILE)
         df = df.fillna("") 
-        
-        # MIGRATIE: Als oude CSV de nieuwe kolommen niet heeft, voeg ze toe
         if "Geld_Overschrijving" not in df.columns: df["Geld_Overschrijving"] = 0.0
         if "Geld_Afstorting" not in df.columns: df["Geld_Afstorting"] = 0.0
-        
         return df
     else:
         cols = [
@@ -112,29 +108,19 @@ def get_data_by_date(datum_obj):
     return match.iloc[0] if not match.empty else None
 
 def calculate_current_saldo(target_date):
-    """
-    Berekent het kassaldo op de ochtend van de geselecteerde datum.
-    Formule: Startsaldo (Admin) + Som(Cash In - Cash Uit) van alle dagen VOOR vandaag.
-    """
     config = load_config()
     start_saldo = float(config.get("start_saldo", 0.0))
-    
     df = load_database()
-    if df.empty:
-        return start_saldo
+    if df.empty: return start_saldo
     
-    # Filter: Alles vóór de geselecteerde datum
-    # We zetten Datum om naar datetime voor correcte vergelijking
     df['DatumDT'] = pd.to_datetime(df['Datum'])
     target_dt = pd.to_datetime(target_date)
-    
     history = df[df['DatumDT'] < target_dt]
     
     total_cash_in = history['Geld_Cash'].sum()
-    total_cash_out = history['Geld_Afstorting'].sum() # Afstorting verlaagt saldo
+    total_cash_out = history['Geld_Afstorting'].sum()
     
-    current_saldo = start_saldo + total_cash_in - total_cash_out
-    return current_saldo
+    return start_saldo + total_cash_in - total_cash_out
 
 def save_transaction(datum, omschrijving, df_input, totaal_omzet, totaal_geld, verschil):
     df_db = load_database()
@@ -173,12 +159,9 @@ def save_transaction(datum, omschrijving, df_input, totaal_omzet, totaal_geld, v
             elif "Afstorting" in label: new_row["Geld_Afstorting"] = bedrag
 
     new_entry_df = pd.DataFrame([new_row])
-    # Zorg dat de kolommen in de juiste volgorde staan (concat fix)
     df_db = pd.concat([df_db, new_entry_df], ignore_index=True)
     df_db = df_db.sort_values(by="Datum", ascending=False)
-    # Verwijder tijdelijke kolom
     if 'DatumDT' in df_db.columns: del df_db['DatumDT']
-    
     df_db.to_csv(DATA_FILE, index=False)
 
 def handle_save_click(datum, omschrijving, edited_df, som_omzet, som_geld, verschil):
@@ -199,25 +182,19 @@ def generate_yuki_export(start_date, end_date):
         desc = row['Omschrijving'] 
         if not desc: desc = f"Dagontvangsten {datum_fmt}"
 
-        # OMZET
         if row['Omzet_21'] > 0: yuki_rows.append([datum_fmt, CODES.get("Omzet_21", "700021"), f"Omzet 21% - {desc}", f"{-row['Omzet_21']:.2f}".replace('.',','), "V21"])
         if row['Omzet_12'] > 0: yuki_rows.append([datum_fmt, CODES.get("Omzet_12", "700012"), f"Omzet 12% - {desc}", f"{-row['Omzet_12']:.2f}".replace('.',','), "V12"])
         if row['Omzet_6'] > 0:  yuki_rows.append([datum_fmt, CODES.get("Omzet_6", "700006"), f"Omzet 6% - {desc}", f"{-row['Omzet_6']:.2f}".replace('.',','), "V6"])
         if row['Omzet_0'] > 0:  yuki_rows.append([datum_fmt, CODES.get("Omzet_0", "700000"), f"Omzet 0% - {desc}", f"{-row['Omzet_0']:.2f}".replace('.',','), "V0"])
         
-        # GELD ONTVANGST
         if row['Geld_Cash'] > 0: yuki_rows.append([datum_fmt, CODES.get("Kas", "570000"), "Ontvangst Cash", f"{row['Geld_Cash']:.2f}".replace('.',','), ""])
         if row['Geld_Bancontact'] > 0: yuki_rows.append([datum_fmt, CODES.get("Bancontact", "580000"), "Ontvangst Bancontact", f"{row['Geld_Bancontact']:.2f}".replace('.',','), ""])
         if row['Geld_Payconiq'] > 0: yuki_rows.append([datum_fmt, CODES.get("Payconiq", "580000"), "Ontvangst Payconiq", f"{row['Geld_Payconiq']:.2f}".replace('.',','), ""])
         if row['Geld_Overschrijving'] > 0: yuki_rows.append([datum_fmt, CODES.get("Oversch", "580000"), "Ontvangst Overschr.", f"{row['Geld_Overschrijving']:.2f}".replace('.',','), ""])
         if row['Geld_Bonnen'] > 0: yuki_rows.append([datum_fmt, CODES.get("Bonnen", "440000"), "Ontvangst Bonnen", f"{row['Geld_Bonnen']:.2f}".replace('.',','), ""])
         
-        # AFSTORTING (Geld gaat uit kas naar bank)
-        # Kas = Credit, Bank/Kruispost = Debet. Yuki verwacht hier positief bedrag op kruispost of bank.
         if row['Geld_Afstorting'] > 0:
-             # Uit Kas (Credit)
              yuki_rows.append([datum_fmt, CODES.get("Kas", "570000"), "Afstorting naar Bank", f"{-row['Geld_Afstorting']:.2f}".replace('.',','), ""])
-             # Naar Bank/Kruispost (Debet)
              yuki_rows.append([datum_fmt, CODES.get("Afstorting", "550000"), "Afstorting naar Bank", f"{row['Geld_Afstorting']:.2f}".replace('.',','), ""])
 
     return pd.DataFrame(yuki_rows, columns=["Datum", "Grootboekrekening", "Omschrijving", "Bedrag", "BtwCode"])
@@ -252,10 +229,9 @@ with st.sidebar:
     st.divider()
     
     if app_mode == "Invoer":
-        st.subheader("Instellingen")
+        st.subheader("Profiel & Sector")
         sector_keuze = st.selectbox("Sector:", ["Detailhandel", "Medisch", "Tandarts", "Horeca", "Bakkerij"])
         
-        # Sector defaults logic
         def_0, def_6, def_12, def_21 = True, True, False, True 
         if "Medisch" in sector_keuze: def_0, def_6, def_12, def_21 = True, False, False, False
         elif "Tandarts" in sector_keuze: def_0, def_6, def_12, def_21 = True, False, False, True
@@ -271,7 +247,7 @@ with st.sidebar:
         use_bc   = st.checkbox("Bancontact", value=True)
         use_cash = st.checkbox("Cash", value=True)
         use_payq = st.checkbox("Payconiq", value=True)
-        use_over = st.checkbox("Overschrijving", value=True) # NIEUW
+        use_over = st.checkbox("Overschrijving", value=True)
         use_vouc = st.checkbox("Cadeaubonnen", value=False)
 
 # ==========================================
@@ -283,9 +259,8 @@ if app_mode == "Invoer":
         st.toast("Succesvol opgeslagen!", icon="✅")
         st.session_state['show_success_toast'] = False
 
-    # MAAND OVERZICHT (Ingelijst)
+    # MAAND OVERZICHT
     with st.expander("📅 Status Maandoverzicht", expanded=False):
-        # (Zelfde kalender code als voorheen)
         huidige_maand = st.session_state.current_date.month
         huidig_jaar = st.session_state.current_date.year
         df_hist = load_database()
@@ -304,36 +279,64 @@ if app_mode == "Invoer":
             status_list.append({"Datum": d.strftime("%d-%m"), "Dag": d.strftime("%a"), "Status": status, "Omzet": f"€ {omzet:.2f}" if omzet > 0 else "-"})
         st.dataframe(pd.DataFrame(status_list), hide_index=True, use_container_width=True)
 
-    # --- SALDO BEREKENING ---
-    # Bereken saldo bij begin van deze dag
-    datum_huidig = st.session_state.current_date
-    openings_saldo = calculate_current_saldo(datum_huidig)
-
-    # --- NAVIGATIE ---
-    check_data = get_data_by_date(datum_huidig)
-    status_icon = "✅" if check_data is not None else "❌"
-    if datum_huidig > datetime.now().date(): status_icon = "🔒"
+    # --- DATUM & STATUS SECTIE (HERSTELD!) ---
     
+    # 1. Bepaal status
+    datum_geselecteerd = st.session_state.current_date
+    check_data = get_data_by_date(datum_geselecteerd)
+    
+    if check_data is not None:
+        status_icon = "✅"
+        status_text = "Reeds ingevuld"
+        status_color = "green"
+    elif datum_geselecteerd > datetime.now().date():
+        status_icon = "🔒"
+        status_text = "Toekomst"
+        status_color = "grey"
+    else:
+        status_icon = "❌"
+        status_text = "Nog in te vullen"
+        status_color = "red"
+
+    dag_naam = datum_geselecteerd.strftime("%A").upper()
+
+    # 2. De Layout
     col_prev, col_pick, col_next = st.columns([1, 2, 1])
-    with col_prev: st.button("⬅️ Vorige", on_click=prev_day, use_container_width=True)
+    
+    with col_prev:
+        st.button("⬅️ Vorige", on_click=prev_day, use_container_width=True)
+        
     with col_pick:
-        st.date_input("Datum", value=datum_huidig, max_value=datetime.now().date(), label_visibility="collapsed", key="date_picker_val", on_change=update_date)
-        st.markdown(f"<div style='text-align: center; font-weight: bold;'>{datum_huidig.strftime('%A').upper()}</div>", unsafe_allow_html=True)
-    with col_next: 
-        is_today = (datum_huidig >= datetime.now().date())
+        st.date_input(
+            "Datum", 
+            value=datum_geselecteerd, 
+            max_value=datetime.now().date(), 
+            label_visibility="collapsed", 
+            key="date_picker_val", 
+            on_change=update_date
+        )
+        # HIER IS HET HERSTELD:
+        st.markdown(f"<div style='text-align: center; font-weight: bold; font-size: 1.1em;'>{dag_naam}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align: center; color: {status_color}; font-size: 0.9em; margin-bottom: 10px;'>{status_icon} {status_text}</div>", unsafe_allow_html=True)
+
+    with col_next:
+        is_today = (datum_geselecteerd >= datetime.now().date())
         st.button("Volgende ➡️", on_click=next_day, disabled=is_today, use_container_width=True)
 
     st.divider()
 
+    # --- SALDO BEREKENING ---
+    openings_saldo = calculate_current_saldo(datum_geselecteerd)
+
     # --- INVOER ---
-    if datum_huidig > datetime.now().date():
+    if datum_geselecteerd > datetime.now().date():
         st.error("Toekomst geblokkeerd.")
     else:
-        existing_data = get_data_by_date(datum_huidig)
+        existing_data = get_data_by_date(datum_geselecteerd)
         is_overwrite_mode = existing_data is not None
         
         omschr_value = existing_data.get("Omschrijving", "") if is_overwrite_mode else ""
-        omschrijving = st.text_input("Omschrijving", value=omschr_value, placeholder=f"Dagontvangsten {datum_huidig.strftime('%d-%m-%Y')}", key=f"omschr_{datum_huidig}")
+        omschrijving = st.text_input("Omschrijving", value=omschr_value, placeholder=f"Dagontvangsten {datum_geselecteerd.strftime('%d-%m-%Y')}", key=f"omschr_{datum_geselecteerd}")
 
         def get_val(col_name): return float(existing_data.get(col_name, 0.0)) if is_overwrite_mode else 0.00
 
@@ -351,13 +354,11 @@ if app_mode == "Invoer":
         if use_over: data_items.append({"Label": "🏦 Overschrijving", "Bedrag": get_val("Geld_Overschrijving"), "Type": "Geld"})
         if use_vouc: data_items.append({"Label": "🎁 Bonnen",         "Bedrag": get_val("Geld_Bonnen"), "Type": "Geld"})
         
-        # NIEUWE RIJ VOOR AFSTORTING (Vermindert saldo)
         data_items.append({"Label": "⬇️ --- KAS UITGAVEN --- ⬇️", "Bedrag": None, "Type": "Separator"})
         data_items.append({"Label": "🏦 Afstorting naar Bank",    "Bedrag": get_val("Geld_Afstorting"), "Type": "Afstorting"})
 
         df_start = pd.DataFrame(data_items)
         
-        # EDITOR
         edited_df = st.data_editor(
             df_start,
             column_config={
@@ -367,51 +368,41 @@ if app_mode == "Invoer":
             },
             hide_index=True, use_container_width=True, num_rows="fixed",
             height=(len(data_items) * 35) + 38,
-            key=f"editor_{datum_huidig}_{st.session_state.reset_count}"
+            key=f"editor_{datum_geselecteerd}_{st.session_state.reset_count}"
         )
 
-        # BEREKENINGEN
         regels = edited_df[edited_df["Type"] != "Separator"].copy()
         regels["Bedrag"] = regels["Bedrag"].fillna(0.0)
         
         som_omzet = regels[regels["Type"] == "Omzet"]["Bedrag"].sum()
-        # Geld is incl cash, bc, overschrijving, etc.
         som_geld = regels[regels["Type"] == "Geld"]["Bedrag"].sum()
-        
-        # Verschil berekening: Omzet moet gelijk zijn aan Geld (Afstorting heeft hier niks mee te maken, dat is kasbeweging)
-        # Dus Ticket Totaal = Totaal Ontvangen (Cash + BC + Overschr...)
         verschil = round(som_omzet - som_geld, 2)
         
-        # KASSALDO BEREKENING LIVE
         cash_in_today = regels[regels["Label"] == "💶 Cash (Lade)"]["Bedrag"].sum()
         cash_out_today = regels[regels["Type"] == "Afstorting"]["Bedrag"].sum()
-        
         eind_saldo = openings_saldo + cash_in_today - cash_out_today
 
-        # --- WEERGAVE SALDO EN TOTALEN ---
         st.markdown("---")
         
         c_links, c_rechts = st.columns(2)
-        
         with c_links:
-            st.markdown("#### 📊 Dag Controle")
+            st.markdown("#### 📊 Balans Check")
             if verschil == 0 and som_omzet > 0:
-                st.success(f"✅ Balans OK: € {som_omzet:.2f}")
+                st.success(f"✅ OK: € {som_omzet:.2f}")
             elif som_omzet == 0:
-                st.info("Nog in te vullen")
+                st.info("Vul gegevens in")
             else:
                 st.error(f"❌ Verschil: € {verschil:.2f}")
 
         with c_rechts:
-            st.markdown("#### 💰 Kaspositie")
-            st.write(f"Begin Saldo: **€ {openings_saldo:.2f}**")
-            st.write(f"+ Cash Vandaag: € {cash_in_today:.2f}")
-            st.write(f"- Afstorting: € {cash_out_today:.2f}")
-            st.markdown(f"**= Eind Saldo: € {eind_saldo:.2f}**")
+            st.markdown("#### 💰 Kassaldo")
+            st.write(f"Begin: € {openings_saldo:.2f}")
+            st.write(f"+ Cash: € {cash_in_today:.2f}")
+            st.write(f"- Bank: € {cash_out_today:.2f}")
+            st.markdown(f"**= Eind: € {eind_saldo:.2f}**")
 
         st.divider()
         
-        # KNOP
         overwrite_confirmed = True
         if is_overwrite_mode:
             overwrite_confirmed = st.checkbox("Ik wil wijzigingen opslaan", value=False)
@@ -421,24 +412,21 @@ if app_mode == "Invoer":
         
         st.button(label, type="primary", disabled=not is_valid, use_container_width=True,
                   on_click=handle_save_click,
-                  args=(datum_huidig, omschrijving, edited_df, som_omzet, som_geld, verschil))
+                  args=(datum_geselecteerd, omschrijving, edited_df, som_omzet, som_geld, verschil))
 
 elif app_mode == "Kassaldo Beheer":
     st.header("💰 Kassaldo Beheer")
-    st.info("Stel hier het initiële startsaldo in. De app berekent de rest automatisch.")
-    
+    st.info("Stel hier het initiële startsaldo in.")
     config = load_config()
     curr_start = config.get("start_saldo", 0.0)
-    
     new_start = st.number_input("Startsaldo (Opening Kasboek)", value=float(curr_start), step=10.0, format="%.2f")
-    
-    if st.button("💾 Startsaldo Bijwerken"):
+    if st.button("💾 Opslaan"):
         config["start_saldo"] = new_start
         save_config(config)
-        st.success(f"Startsaldo ingesteld op € {new_start:.2f}. Alle dagtotalen worden nu herberekend.")
+        st.success("Opgeslagen!")
 
 elif app_mode == "Export (Yuki)":
-    # (Export Code)
+    # (Zelfde als voorheen)
     st.header("📤 Export Yuki")
     col_start, col_end = st.columns(2)
     start_date = col_start.date_input("Van", datetime(datetime.now().year, datetime.now().month, 1))
@@ -453,7 +441,7 @@ elif app_mode == "Export (Yuki)":
         else: st.warning("Geen data.")
 
 elif app_mode == "Instellingen":
-    # (Instellingen Code)
+    # (Zelfde als voorheen)
     st.header("⚙️ Rekeningen")
     current_settings = load_settings()
     edited_settings = st.data_editor(current_settings, hide_index=True, use_container_width=True, num_rows="fixed")
