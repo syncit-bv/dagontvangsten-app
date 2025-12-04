@@ -20,12 +20,26 @@ ADMIN_PASSWORD = "Yuki2025!"
 
 st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="centered")
 
-# --- CSS STYLING ---
+# --- CSS STYLING (GECORRIGEERD) ---
 st.markdown("""
     <style>
-    header {visibility: hidden;}
-    .block-container { padding-top: 1rem; padding-bottom: 2rem; }
+    /* 1. Header en Menu ZICHTBAAR houden, maar achtergrond transparant */
+    header[data-testid="stHeader"] {
+        background-color: transparent !important;
+    }
     
+    /* Verberg de gekleurde 'running' streep bovenaan voor cleanere look */
+    [data-testid="stDecoration"] {
+        display: none;
+    }
+
+    /* 2. Inhoud naar beneden duwen zodat het niet achter de menuknop staat */
+    .block-container { 
+        padding-top: 3.5rem !important; 
+        padding-bottom: 2rem; 
+    }
+    
+    /* 3. Info Kaarten Styling */
     .info-card {
         height: 50px; display: flex; align-items: center; justify-content: center;
         border-radius: 8px; font-weight: bold; font-size: 0.95rem; margin-bottom: 10px;
@@ -57,37 +71,33 @@ def save_config(config_data):
     with open(CONFIG_FILE, "w") as f: json.dump(config_data, f)
 
 def get_default_settings():
-    # AANGEPAST: Nieuwe kolom 'ExportDesc' (Omschrijving Template) toegevoegd
-    # Standaardwaarde bevat &datum& en &notitie&
     return [
         {"Code": "Omzet_21",   "Label": "Omzet 21%",       "Rekening": "700021", "ExportDesc": "Omzet 21% (&notitie&)", "BtwCode": "V21", "Type": "Credit"},
         {"Code": "Omzet_12",   "Label": "Omzet 12%",       "Rekening": "700012", "ExportDesc": "Omzet 12% (&notitie&)", "BtwCode": "V12", "Type": "Credit"},
         {"Code": "Omzet_6",    "Label": "Omzet 6%",        "Rekening": "700006", "ExportDesc": "Omzet 6% (&notitie&)",  "BtwCode": "V6",  "Type": "Credit"},
         {"Code": "Omzet_0",    "Label": "Omzet 0%",        "Rekening": "700000", "ExportDesc": "Omzet 0% (&notitie&)",  "BtwCode": "V0",  "Type": "Credit"},
-        {"Code": "Cash",       "Label": "Kas (Cash)",      "Rekening": "570000", "ExportDesc": "Ontvangst Cash &datum&", "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Bancontact", "Label": "Bancontact",      "Rekening": "580000", "ExportDesc": "Bancontact &datum&",     "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Payconiq",   "Label": "Payconiq",        "Rekening": "580000", "ExportDesc": "Payconiq &datum&",       "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Oversch",    "Label": "Overschrijving",  "Rekening": "580000", "ExportDesc": "Overschrijving &datum&", "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Bonnen",     "Label": "Cadeaubonnen",    "Rekening": "440000", "ExportDesc": "Cadeaubon &datum&",      "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Afstorting", "Label": "Afstorting Bank", "Rekening": "550000", "ExportDesc": "Afstorting &datum&",     "BtwCode": "",    "Type": "Credit"},
+        {"Code": "Cash",       "Label": "Kas (Cash)",      "Rekening": "570000", "ExportDesc": "Ontvangst Cash",        "BtwCode": "",    "Type": "Debet"},
+        {"Code": "Bancontact", "Label": "Bancontact",      "Rekening": "580000", "ExportDesc": "Bancontact &datum&",    "BtwCode": "",    "Type": "Debet"},
+        {"Code": "Payconiq",   "Label": "Payconiq",        "Rekening": "580000", "ExportDesc": "Payconiq &datum&",      "BtwCode": "",    "Type": "Debet"},
+        {"Code": "Oversch",    "Label": "Overschrijving",  "Rekening": "580000", "ExportDesc": "Overschrijving &datum&","BtwCode": "",    "Type": "Debet"},
+        {"Code": "Bonnen",     "Label": "Cadeaubonnen",    "Rekening": "440000", "ExportDesc": "Cadeaubon &datum&",     "BtwCode": "",    "Type": "Debet"},
+        {"Code": "Afstorting", "Label": "Afstorting Bank", "Rekening": "550000", "ExportDesc": "Afstorting &datum&",    "BtwCode": "",    "Type": "Credit"},
     ]
 
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
         df = pd.read_csv(SETTINGS_FILE, dtype={"Rekening": str, "BtwCode": str})
         
-        # MIGRATE: Voeg ExportDesc toe als die mist
+        # MIGRATE: Voeg ExportDesc toe als die mist (oude versies updaten)
         if "ExportDesc" not in df.columns:
             st.toast("Instellingen bijgewerkt: Kolom 'Omschrijving' toegevoegd", icon="🛠️")
-            df["ExportDesc"] = df["Label"] + " &datum&" # Default waarde
+            df["ExportDesc"] = df["Label"] # Default
             df.to_csv(SETTINGS_FILE, index=False)
             
-        # MIGRATE: Kas -> Cash check
         if "Kas" in df["Code"].values:
             df.loc[df["Code"] == "Kas", "Code"] = "Cash"
             df.to_csv(SETTINGS_FILE, index=False)
             
-        # MIGRATE: Nieuwe rijen check
         defaults = pd.DataFrame(get_default_settings())
         for code in ["Oversch", "Afstorting"]:
             if code not in df["Code"].values:
@@ -105,18 +115,18 @@ def load_settings():
 def save_settings(df_settings): df_settings.to_csv(SETTINGS_FILE, index=False)
 def get_yuki_mapping():
     df = load_settings()
-    # We sturen nu meer info terug: Rekening, Label, EN de Export Template
     mapping = {}
     for index, row in df.iterrows():
         mapping[row['Code']] = {
             'Rekening': row['Rekening'],
             'Label': row['Label'],
-            'Template': row.get('ExportDesc', row['Label']) # Fallback
+            'Template': row.get('ExportDesc', row['Label']) # Omschrijving template
         }
     return mapping
 
 # --- EXPORT CONFIG ---
 def get_default_export_config():
+    # Naam tegenrekening wijst nu standaard naar 'Label'
     return [
         {"Kolom": "Grootboekrekening kas", "Bron": "Vast", "Waarde": "570000"},
         {"Kolom": "Kas omschrijving",      "Bron": "Vast", "Waarde": "Dagontvangsten"},
@@ -134,6 +144,7 @@ def get_default_export_config():
 def load_export_config():
     if os.path.exists(EXPORT_CONFIG_FILE):
         df = pd.read_csv(EXPORT_CONFIG_FILE)
+        # Verwijder oude BTW Code kolom uit config indien aanwezig
         if "BTW Code" in df["Kolom"].values:
             df = df[df["Kolom"] != "BTW Code"]
             df.to_csv(EXPORT_CONFIG_FILE, index=False)
@@ -212,12 +223,12 @@ def handle_save_click(datum, omschrijving, edited_df, som_omzet, som_geld, versc
     st.session_state.omschrijving = "" 
     st.session_state['show_success_toast'] = True
 
-# --- DYNAMISCHE EXPORT ENGINE (AANGEPAST: VARIABELEN) ---
+# --- DYNAMISCHE EXPORT ENGINE (MET VARIABELEN) ---
 
 def generate_flexible_export(start_date, end_date):
     df_data = load_database()
     export_config = load_export_config()
-    MAPPING = get_yuki_mapping() # Bevat nu ook 'Template'
+    MAPPING = get_yuki_mapping() 
     
     mask = (df_data['Datum'] >= str(start_date)) & (df_data['Datum'] <= str(end_date))
     selection = df_data.loc[mask]
@@ -231,7 +242,7 @@ def generate_flexible_export(start_date, end_date):
         if row['Totaal_Omzet'] == 0 and row['Totaal_Geld'] == 0: continue
         
         datum_fmt = pd.to_datetime(row['Datum']).strftime('%d-%m-%Y')
-        desc_user = row['Omschrijving'] # De notitie van de gebruiker
+        desc_user = row['Omschrijving'] 
         
         transactions = []
         
@@ -241,24 +252,20 @@ def generate_flexible_export(start_date, end_date):
             label = info.get('Label', code_key)
             template = info.get('Template', '')
             
-            # --- VARIABELEN VERVANGEN ---
-            # &datum& -> 04-12-2025
-            # &label& -> Bancontact
-            # &notitie& -> Dagtotaal winkel
-            
+            # VARIABELEN VERVANGEN
             final_desc = template.replace("&datum&", datum_fmt)
-            final_desc = final_desc.replace("&date&", datum_fmt) # Support voor Engels
+            final_desc = final_desc.replace("&date&", datum_fmt)
             final_desc = final_desc.replace("&label&", label)
             final_desc = final_desc.replace("&notitie&", desc_user)
             
-            # Fallback als template leeg is
+            # Fallback
             if not final_desc: final_desc = f"{label} {datum_fmt}"
 
             transactions.append({
                 "Rek": rekening, 
                 "Bedrag": bedrag, 
                 "Btw": btw, 
-                "Desc": final_desc, # Dit is de geformatteerde tekst
+                "Desc": final_desc, 
                 "Label": label
             })
 
@@ -288,8 +295,8 @@ def generate_flexible_export(start_date, end_date):
                     final_val = val_key if val_key and str(val_key) != "nan" else ""
                 elif source == "Veld":
                     if val_key == "Datum": final_val = datum_fmt
-                    elif val_key == "Omschrijving": final_val = t['Desc'] # Gebruik de geformatteerde string
-                    elif val_key == "Label": final_val = t['Label']
+                    elif val_key == "Omschrijving": final_val = t['Desc'] # Geformatteerde tekst
+                    elif val_key == "Label": final_val = t['Label']       # Puur label (voor Tegenrekening naam)
                     elif val_key == "Bedrag": final_val = f"{-t['Bedrag']:.2f}".replace('.',',')
                     elif val_key == "Grootboekrekening": final_val = t['Rek']
                     elif val_key == "BtwCode": final_val = t['Btw']
@@ -517,7 +524,7 @@ elif app_mode == "Export Configuratie":
     st.header("📤 Export Configuratie")
     current_export_config = load_export_config()
     source_options = ["Vast", "Veld"]
-    # Label optie is toegevoegd
+    internal_fields = ["Datum", "Omschrijving", "Bedrag", "Grootboekrekening", "BtwCode", "Label"]
     edited_export = st.data_editor(current_export_config, column_config={"Kolom": st.column_config.TextColumn("CSV Kolom", required=True), "Bron": st.column_config.SelectboxColumn("Type", options=source_options), "Waarde": st.column_config.TextColumn("Waarde")}, num_rows="dynamic", use_container_width=True, hide_index=True)
     if st.button("💾 Opslaan", type="primary"):
         save_export_config(edited_export)
@@ -525,17 +532,16 @@ elif app_mode == "Export Configuratie":
 
 elif app_mode == "Instellingen":
     st.header("⚙️ Rekeningen & Omschrijvingen")
-    st.info("Hier kan je per type de rekeningnummer en de standaard omschrijving voor de export bepalen. Gebruik &datum& of &notitie& in de tekst.")
+    st.info("Gebruik &datum&, &label& of &notitie& in de tekst.")
     current_settings = load_settings()
     
-    # We tonen de nieuwe kolom 'ExportDesc' als 'Export Omschrijving'
     edited_settings = st.data_editor(
         current_settings, 
         column_config={
-            "Code": None, # Verberg ID
+            "Code": None, 
             "Label": st.column_config.TextColumn("Type", disabled=True),
             "Rekening": st.column_config.TextColumn("Grootboekrekening (Yuki)"),
-            "ExportDesc": st.column_config.TextColumn("Omschrijving Template (Export)"),
+            "ExportDesc": st.column_config.TextColumn("Omschrijving Template"),
             "BtwCode": st.column_config.TextColumn("BTW Code"),
             "Type": None
         },
