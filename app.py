@@ -27,7 +27,6 @@ st.markdown("""
     .stAlert { margin-top: 1rem; }
     div.stButton > button { width: 100%; }
     
-    /* Styling voor de Saldo Kaart */
     .saldo-box {
         padding: 15px;
         background-color: #f0f2f6;
@@ -127,9 +126,7 @@ def save_transaction(datum, omschrijving, df_input, totaal_omzet, totaal_geld, v
     datum_str = str(datum)
     df_db = df_db[df_db['Datum'] != datum_str]
     
-    # Als er geen df_input is (bij gesloten dag), maak dummy data
     if df_input is None:
-        # Dummy DataFrame maken zodat de loop hieronder niet crasht
         df_input = pd.DataFrame(columns=['Label', 'Bedrag'])
 
     if not omschrijving or omschrijving.strip() == "" or omschrijving == "nan":
@@ -183,10 +180,7 @@ def generate_yuki_export(start_date, end_date):
     CODES = get_yuki_mapping() 
     yuki_rows = []
     for index, row in selection.iterrows():
-        # FILTER: Als totaal 0 is (Sluitingsdag), slaan we de export over (of je boekt 0, maar meestal wil je niks)
-        # Hier kiezen we ervoor om niets te exporteren voor gesloten dagen.
-        if row['Totaal_Omzet'] == 0 and row['Totaal_Geld'] == 0:
-            continue
+        if row['Totaal_Omzet'] == 0 and row['Totaal_Geld'] == 0: continue
 
         datum_fmt = pd.to_datetime(row['Datum']).strftime('%d-%m-%Y')
         desc = row['Omschrijving'] 
@@ -209,16 +203,24 @@ def generate_yuki_export(start_date, end_date):
 
     return pd.DataFrame(yuki_rows, columns=["Datum", "Grootboekrekening", "Omschrijving", "Bedrag", "BtwCode"])
 
-# --- STATE ---
+# --- STATE MANAGEMENT ---
 if 'reset_count' not in st.session_state: st.session_state.reset_count = 0
 if 'show_success_toast' not in st.session_state: st.session_state['show_success_toast'] = False
 if 'current_date' not in st.session_state: st.session_state.current_date = datetime.now().date()
 
-def prev_day(): st.session_state.current_date -= timedelta(days=1)
+# HIER ZAT HET PROBLEEM (FIXED):
+# We moeten ook 'date_picker_val' bijwerken, anders luistert de widget niet
+def prev_day(): 
+    st.session_state.current_date -= timedelta(days=1)
+    st.session_state.date_picker_val = st.session_state.current_date
+
 def next_day(): 
     if st.session_state.current_date < datetime.now().date():
         st.session_state.current_date += timedelta(days=1)
-def update_date(): st.session_state.current_date = st.session_state.date_picker_val
+        st.session_state.date_picker_val = st.session_state.current_date
+
+def update_date(): 
+    st.session_state.current_date = st.session_state.date_picker_val
 
 # ==========================================
 # ⚙️ SIDEBAR
@@ -285,14 +287,13 @@ if app_mode == "Invoer":
             if not row.empty:
                 omzet_val = float(row.iloc[0]['Totaal_Omzet'])
                 geld_val = float(row.iloc[0]['Totaal_Geld'])
-                
                 if omzet_val == 0 and geld_val == 0:
-                    status_txt = "💤" # Gesloten / Rustdag
+                    status_txt = "💤"
                 else:
-                    status_txt = "✅" # Gedaan
+                    status_txt = "✅"
                     omzet = omzet_val
             elif d < date.today(): 
-                status_txt = "❌" # Te laat
+                status_txt = "❌"
             
             status_list.append({"Datum": d.strftime("%d-%m"), "Dag": d.strftime("%a"), "Status": status_txt, "Omzet": f"€ {omzet:.2f}" if omzet > 0 else "-"})
         st.dataframe(pd.DataFrame(status_list), hide_index=True, use_container_width=True)
@@ -303,7 +304,7 @@ if app_mode == "Invoer":
     
     if check_data is not None:
         if float(check_data['Totaal_Omzet']) == 0 and float(check_data['Totaal_Geld']) == 0:
-            status_icon, status_text, status_color = "💤", "Sluitingsdag / Inactief", "blue"
+            status_icon, status_text, status_color = "💤", "Sluitingsdag", "blue"
         else:
             status_icon, status_text, status_color = "✅", "Reeds ingevuld", "green"
     elif datum_geselecteerd > datetime.now().date():
@@ -341,24 +342,16 @@ if app_mode == "Invoer":
         # HIER IS DE CHECKBOX VOOR INACTIVITEIT
         is_gesloten = st.checkbox("🚫 Zaak gesloten / Geen ontvangsten", value=False)
         
-        # Als we data laden die 0 is, vinken we dit automatisch aan (gemak)
         if is_overwrite_mode and not is_gesloten:
             if float(existing_data['Totaal_Omzet']) == 0 and float(existing_data['Totaal_Geld']) == 0:
                 is_gesloten = True
 
         if is_gesloten:
-            # GESLOTEN MODUS
-            st.info("De zaak is gemarkeerd als gesloten. Alle waarden worden op € 0,00 gezet.")
-            
-            # Dummy waarden voor logica
+            st.info("Status: Gesloten (0.00)")
             som_omzet, som_geld, verschil, cash_in_today, cash_out_today = 0.0, 0.0, 0.0, 0.0, 0.0
-            edited_df = None # Geen data om op te slaan uit editor
-            
-            # Automatische omschrijving aanpassen indien leeg
+            edited_df = None 
             if not omschrijving: omschrijving = "SLUITINGSDAG"
-
         else:
-            # NORMALE INVOER MODUS
             def get_val(col_name): return float(existing_data.get(col_name, 0.0)) if is_overwrite_mode else 0.00
 
             data_items = []
@@ -402,8 +395,6 @@ if app_mode == "Invoer":
             cash_in_today = regels[regels["Label"] == "💶 Cash (Lade)"]["Bedrag"].sum()
             cash_out_today = regels[regels["Type"] == "Afstorting"]["Bedrag"].sum()
 
-        # EINDE IF/ELSE GESLOTEN
-        
         eind_saldo = openings_saldo + cash_in_today - cash_out_today
 
         st.markdown("---")
@@ -412,7 +403,7 @@ if app_mode == "Invoer":
         with c_links:
             st.markdown("#### 📊 Dag Controle")
             if is_gesloten:
-                st.info("Status: Gesloten (0.00)")
+                st.info("Status: Gesloten")
             elif verschil == 0 and som_omzet > 0:
                 st.success(f"✅ Balans OK: € {som_omzet:.2f}")
             elif som_omzet == 0:
@@ -433,9 +424,7 @@ if app_mode == "Invoer":
         if is_overwrite_mode:
             overwrite_confirmed = st.checkbox("Ik wil wijzigingen opslaan", value=False)
             
-        # Validatie: OF (Normaal en Klopt) OF (Gesloten)
         is_valid = ((som_omzet > 0 and verschil == 0) or is_gesloten) and overwrite_confirmed
-        
         label = "🔄 Opslaan" if is_overwrite_mode else "💾 Opslaan"
         
         st.button(label, type="primary", disabled=not is_valid, use_container_width=True,
@@ -443,7 +432,6 @@ if app_mode == "Invoer":
                   args=(datum_geselecteerd, omschrijving, edited_df, som_omzet, som_geld, verschil))
 
 elif app_mode == "Kassaldo Beheer":
-    # (Zelfde als voorheen)
     st.header("💰 Kassaldo Beheer")
     st.info("Stel hier het initiële startsaldo in.")
     config = load_config()
@@ -455,7 +443,6 @@ elif app_mode == "Kassaldo Beheer":
         st.success("Opgeslagen!")
 
 elif app_mode == "Export (Yuki)":
-    # (Zelfde als voorheen)
     st.header("📤 Export Yuki")
     col_start, col_end = st.columns(2)
     start_date = col_start.date_input("Van", datetime(datetime.now().year, datetime.now().month, 1))
@@ -470,7 +457,6 @@ elif app_mode == "Export (Yuki)":
         else: st.warning("Geen data.")
 
 elif app_mode == "Instellingen":
-    # (Zelfde als voorheen)
     st.header("⚙️ Rekeningen")
     current_settings = load_settings()
     edited_settings = st.data_editor(current_settings, hide_index=True, use_container_width=True, num_rows="fixed")
