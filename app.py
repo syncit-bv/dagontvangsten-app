@@ -20,12 +20,21 @@ ADMIN_PASSWORD = "Yuki2025!"
 
 st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="centered")
 
-# --- CSS STYLING ---
+# --- CSS STYLING (CORRECTIE: MENU TERUG ZICHTBAAR) ---
 st.markdown("""
     <style>
-    header {visibility: hidden;}
-    .block-container { padding-top: 1rem; padding-bottom: 2rem; }
+    /* 1. Header Transparant maken (Menu blijft zichtbaar, witte balk weg) */
+    header[data-testid="stHeader"] {
+        background-color: transparent !important;
+    }
     
+    /* 2. Inhoud positie */
+    .block-container { 
+        padding-top: 3rem; /* Iets meer ruimte voor de menuknop */
+        padding-bottom: 2rem; 
+    }
+    
+    /* 3. Info Kaarten */
     .info-card {
         height: 50px; display: flex; align-items: center; justify-content: center;
         border-radius: 8px; font-weight: bold; font-size: 0.95rem; margin-bottom: 10px;
@@ -67,32 +76,23 @@ def get_default_settings():
         {"Code": "Payconiq",   "Label": "Payconiq",        "Rekening": "580000", "BtwCode": "",    "Type": "Debet"},
         {"Code": "Oversch",    "Label": "Overschrijving",  "Rekening": "580000", "BtwCode": "",    "Type": "Debet"},
         {"Code": "Bonnen",     "Label": "Cadeaubonnen",    "Rekening": "440000", "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Afstorting", "Label": "Afstorting Bank", "Rekening": "580000", "BtwCode": "",    "Type": "Credit"},
+        {"Code": "Afstorting", "Label": "Afstorting Bank", "Rekening": "550000", "BtwCode": "",    "Type": "Credit"},
     ]
 
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
         df = pd.read_csv(SETTINGS_FILE, dtype={"Rekening": str, "BtwCode": str})
-        
-        # --- AUTO-MIGRATIE LOGICA ---
-        # 1. Kas -> Cash
         if "Kas" in df["Code"].values:
             df.loc[df["Code"] == "Kas", "Code"] = "Cash"
             df.to_csv(SETTINGS_FILE, index=False)
-            
-        # 2. Toevoegen Overschrijving (indien ontbreekt)
         if "Oversch" not in df["Code"].values:
             new_row = {"Code": "Oversch", "Label": "Overschrijving", "Rekening": "580000", "BtwCode": "", "Type": "Debet"}
             df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
             df.to_csv(SETTINGS_FILE, index=False)
-            
-        # 3. TOEGEVOEGD: Check of 'Afstorting' bestaat, zo nee: toevoegen
         if "Afstorting" not in df["Code"].values:
-            new_row = {"Code": "Afstorting", "Label": "Afstorting Bank", "Rekening": "580000", "BtwCode": "", "Type": "Credit"}
+            new_row = {"Code": "Afstorting", "Label": "Afstorting Bank", "Rekening": "550000", "BtwCode": "", "Type": "Credit"}
             df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
             df.to_csv(SETTINGS_FILE, index=False)
-            st.toast("Instellingen bijgewerkt: 'Afstorting' toegevoegd", icon="🛠️")
-            
         return df
     else:
         df = pd.DataFrame(get_default_settings())
@@ -230,7 +230,6 @@ def generate_flexible_export(start_date, end_date):
         
         def add_trx(code_key, bedrag, btw, trx_type="Omzet", label_override=None):
             rekening = CODES.get(code_key, "")
-            
             if trx_type == "Payment":
                 note = LABELS.get(code_key, label_override)
             else:
@@ -240,13 +239,13 @@ def generate_flexible_export(start_date, end_date):
                 "Rek": rekening, "Bedrag": bedrag, "Btw": btw, "Note": note, "Type": trx_type
             })
 
-        # 1. OMZET
+        # OMZET
         if row['Omzet_21'] > 0: add_trx("Omzet_21", row['Omzet_21'], "V21", "Omzet", "Omzet 21%")
         if row['Omzet_12'] > 0: add_trx("Omzet_12", row['Omzet_12'], "V12", "Omzet", "Omzet 12%")
         if row['Omzet_6'] > 0:  add_trx("Omzet_6",  row['Omzet_6'],  "V6",  "Omzet", "Omzet 6%")
         if row['Omzet_0'] > 0:  add_trx("Omzet_0",  row['Omzet_0'],  "V0",  "Omzet", "Omzet 0%")
         
-        # 2. GELD
+        # GELD
         if row['Geld_Bancontact'] > 0:   add_trx("Bancontact", -row['Geld_Bancontact'], "", "Payment")
         if row['Geld_Payconiq'] > 0:     add_trx("Payconiq",   -row['Geld_Payconiq'],   "", "Payment")
         if row['Geld_Overschrijving'] > 0: add_trx("Oversch",  -row['Geld_Overschrijving'], "", "Payment")
@@ -335,7 +334,7 @@ if app_mode == "Invoer":
     
     datum_geselecteerd = st.session_state.date_picker_val
     
-    # Header & Status
+    # Header
     check_data = get_data_by_date(datum_geselecteerd)
     openings_saldo = calculate_current_saldo(datum_geselecteerd)
     
