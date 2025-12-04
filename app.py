@@ -20,10 +20,10 @@ ADMIN_PASSWORD = "Yuki2025!"
 
 st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="centered")
 
-# --- CSS STYLING ---
+# --- CSS STYLING (HERSTELD: Menu knop is terug zichtbaar) ---
 st.markdown("""
     <style>
-    header {visibility: hidden;}
+    /* CSS voor witruimte, maar ZONDER de header te verbergen */
     .block-container { padding-top: 1rem; padding-bottom: 2rem; }
     
     .info-card {
@@ -90,14 +90,13 @@ def load_settings():
 def save_settings(df_settings): df_settings.to_csv(SETTINGS_FILE, index=False)
 def get_yuki_mapping():
     df = load_settings()
-    # We maken een mapping van Code -> Rekening én Code -> Label (voor de omschrijving)
     rekening_map = dict(zip(df.Code, df.Rekening))
     label_map = dict(zip(df.Code, df.Label))
     return rekening_map, label_map
 
 # --- EXPORT CONFIG ---
 def get_default_export_config():
-    # AANGEPAST: BTW Code is verwijderd uit deze lijst
+    # BTW Code verwijderd zoals gevraagd
     return [
         {"Kolom": "Grootboekrekening kas", "Bron": "Vast", "Waarde": "570000"},
         {"Kolom": "Kas omschrijving",      "Bron": "Vast", "Waarde": "Dagontvangsten"},
@@ -115,7 +114,7 @@ def get_default_export_config():
 def load_export_config():
     if os.path.exists(EXPORT_CONFIG_FILE):
         df = pd.read_csv(EXPORT_CONFIG_FILE)
-        # Check of BTW Code er nog in zit (van oude versie), zo ja, verwijder hem
+        # Verwijder BTW Code uit bestaande config indien aanwezig
         if "BTW Code" in df["Kolom"].values:
             df = df[df["Kolom"] != "BTW Code"]
             df.to_csv(EXPORT_CONFIG_FILE, index=False)
@@ -194,17 +193,17 @@ def handle_save_click(datum, omschrijving, edited_df, som_omzet, som_geld, versc
     st.session_state.omschrijving = "" 
     st.session_state['show_success_toast'] = True
 
+# --- DYNAMISCHE EXPORT ENGINE (AANGEPAST) ---
+
 def generate_flexible_export(start_date, end_date):
     df_data = load_database()
     export_config = load_export_config()
-    # We halen nu rekeningen EN labels op
     CODES, LABELS = get_yuki_mapping()
     
-    # FILTER OP DATUM
     mask = (df_data['Datum'] >= str(start_date)) & (df_data['Datum'] <= str(end_date))
     selection = df_data.loc[mask]
     
-    # AANGEPAST: SORTERING OPLOPEND (Oudste eerst)
+    # FIX: Sortering Oplopend (Oud naar Nieuw)
     selection = selection.sort_values(by="Datum", ascending=True)
     
     if selection.empty: return None
@@ -219,18 +218,16 @@ def generate_flexible_export(start_date, end_date):
         
         transactions = []
         
-        # Helper om transacties toe te voegen
-        # Type: 'Omzet' (behoudt dagomschrijving) of 'Payment' (krijgt puur label)
+        # Helper: trx_type bepaalt of we de volledige omschrijving nemen (Omzet) of enkel label (Payment)
         def add_trx(code_key, bedrag, btw, trx_type="Omzet", label_override=None):
             rekening = CODES.get(code_key, "")
             
-            # Bepaal de omschrijving
+            # FIX: Omschrijvingen logica
             if trx_type == "Payment":
-                # AANGEPAST: Voor payments gebruiken we PUUR het label (bv "Bancontact")
-                # We halen het label uit de instellingen (LABELS dict)
+                # Enkel de naam van de betaalwijze (bv "Bancontact")
                 note = LABELS.get(code_key, label_override)
             else:
-                # Voor omzet behouden we de oude stijl
+                # Voor omzet: label (bv "Omzet 21%")
                 note = label_override 
 
             transactions.append({
@@ -241,31 +238,13 @@ def generate_flexible_export(start_date, end_date):
                 "Type": trx_type
             })
 
-        # 1. OMZET (Blijft zoals het was: Credit)
+        # 1. OMZET
         if row['Omzet_21'] > 0: add_trx("Omzet_21", row['Omzet_21'], "V21", "Omzet", "Omzet 21%")
         if row['Omzet_12'] > 0: add_trx("Omzet_12", row['Omzet_12'], "V12", "Omzet", "Omzet 12%")
         if row['Omzet_6'] > 0:  add_trx("Omzet_6",  row['Omzet_6'],  "V6",  "Omzet", "Omzet 6%")
         if row['Omzet_0'] > 0:  add_trx("Omzet_0",  row['Omzet_0'],  "V0",  "Omzet", "Omzet 0%")
         
-        # 2. GELD (Nu type 'Payment' -> Neemt label over uit instellingen)
-        # Let op: Bedrag negatief want het is een tegenboeking (Debet) in de kasstaat logica?
-        # Of in Yuki memoriaal:
-        # 700000 (Omzet) @ Credit  (Negatief bedrag in CSV)
-        # 580000 (Bancontact) @ Debet (Positief bedrag in CSV)
-        # In de vorige code deden we payments negatief. Even checken of dit klopt voor Yuki import.
-        # Standaard Yuki Memoriaal: Debet = Positief, Credit = Negatief.
-        # Dus:
-        # Omzet (Credit) = -100
-        # Bancontact (Debet) = +100
-        
-        # AANGEPAST: Tekens omgedraaid voor Yuki Memoriaal logica.
-        # Omzet = Credit = NEGATIEF
-        # Geld = Debet = POSITIEF
-        
-        # Herstel van vorige logica waar ik tekens omdraaide in de final loop.
-        # Laten we hier gewoon positief/negatief opslaan zoals het IS, en in de loop formatteren.
-        # Omzet moet Credit zijn.
-        
+        # 2. GELD (Type = Payment -> Neemt enkel label)
         if row['Geld_Bancontact'] > 0:   add_trx("Bancontact", -row['Geld_Bancontact'], "", "Payment")
         if row['Geld_Payconiq'] > 0:     add_trx("Payconiq",   -row['Geld_Payconiq'],   "", "Payment")
         if row['Geld_Overschrijving'] > 0: add_trx("Oversch",  -row['Geld_Overschrijving'], "", "Payment")
@@ -286,16 +265,13 @@ def generate_flexible_export(start_date, end_date):
                 elif source == "Veld":
                     if val_key == "Datum": final_val = datum_fmt
                     elif val_key == "Omschrijving": 
-                        # HIER IS DE LOGICA AANGEPAST:
+                        # AANGEPAST: Afhankelijk van type
                         if t['Type'] == 'Payment':
                             final_val = t['Note'] # Puur "Bancontact"
                         else:
-                            final_val = f"{desc_base} ({t['Note']})" # "Dagontvangst... (Omzet 21%)"
+                            final_val = f"{desc_base} ({t['Note']})" # "Dagontvangsten... (Omzet 21%)"
                             
                     elif val_key == "Bedrag": 
-                        # Omzet (positief in DB) -> Moet Credit (Negatief) in Export
-                        # Payment (negatief meegegeven hierboven) -> Moet Debet (Positief) in Export
-                        # Dus we draaien het teken om
                         final_val = f"{-t['Bedrag']:.2f}".replace('.',',')
                         
                     elif val_key == "Grootboekrekening": final_val = t['Rek']
@@ -325,6 +301,7 @@ with st.sidebar:
     pwd = st.text_input("Boekhouder Login", type="password", placeholder="Wachtwoord")
     is_admin = (pwd == ADMIN_PASSWORD)
     app_mode = "Invoer" 
+    
     if is_admin:
         st.success("🔓 Admin")
         app_mode = st.radio("Ga naar:", ["Invoer", "Export (Yuki)", "Instellingen", "Export Configuratie", "Kassaldo Beheer"])
@@ -359,34 +336,10 @@ if app_mode == "Invoer":
     if st.session_state['show_success_toast']:
         st.toast("Opgeslagen!", icon="✅")
         st.session_state['show_success_toast'] = False
-
+    
     datum_geselecteerd = st.session_state.date_picker_val
-
-    # --- MAAND OVERZICHT ---
-    with st.expander("📅 Bekijk status maandoverzicht", expanded=False):
-        huidige_maand = datum_geselecteerd.month
-        huidig_jaar = datum_geselecteerd.year
-        df_hist = load_database()
-        num_days = calendar.monthrange(huidig_jaar, huidige_maand)[1]
-        days = [date(huidig_jaar, huidige_maand, day) for day in range(1, num_days + 1)]
-        status_list = []
-        for d in days:
-            d_str = str(d)
-            row = df_hist[df_hist['Datum'] == d_str]
-            omzet = 0.0
-            status_txt = "⚪"
-            if not row.empty:
-                omzet_val = float(row.iloc[0]['Totaal_Omzet'])
-                geld_val = float(row.iloc[0]['Totaal_Geld'])
-                if omzet_val == 0 and geld_val == 0: status_txt = "💤"
-                else: 
-                    status_txt = "✅"
-                    omzet = omzet_val
-            elif d < date.today(): status_txt = "❌"
-            status_list.append({"Datum": d.strftime("%d-%m"), "Dag": d.strftime("%a"), "Status": status_txt, "Omzet": f"€ {omzet:.2f}" if omzet > 0 else "-"})
-        st.dataframe(pd.DataFrame(status_list), hide_index=True, use_container_width=True)
-
-    # --- HEADER SECTIE ---
+    
+    # --- HEADER ---
     check_data = get_data_by_date(datum_geselecteerd)
     openings_saldo = calculate_current_saldo(datum_geselecteerd)
     
@@ -419,7 +372,7 @@ if app_mode == "Invoer":
 
     st.divider()
 
-    # Invoer
+    # --- INVOER ---
     if datum_geselecteerd > datetime.now().date(): st.info("Toekomst.")
     else:
         existing_data = get_data_by_date(datum_geselecteerd)
@@ -494,7 +447,32 @@ if app_mode == "Invoer":
                   on_click=handle_save_click,
                   args=(datum_geselecteerd, omschrijving, edited_df, som_omzet, som_geld, verschil))
 
+    # --- MAAND OVERZICHT (HERSTELD NAAR ONDERAAN) ---
+    with st.expander("📅 Bekijk status maandoverzicht", expanded=False):
+        huidige_maand = datum_geselecteerd.month
+        huidig_jaar = datum_geselecteerd.year
+        df_hist = load_database()
+        num_days = calendar.monthrange(huidig_jaar, huidige_maand)[1]
+        days = [date(huidig_jaar, huidige_maand, day) for day in range(1, num_days + 1)]
+        status_list = []
+        for d in days:
+            d_str = str(d)
+            row = df_hist[df_hist['Datum'] == d_str]
+            omzet = 0.0
+            status_txt = "⚪"
+            if not row.empty:
+                omzet_val = float(row.iloc[0]['Totaal_Omzet'])
+                geld_val = float(row.iloc[0]['Totaal_Geld'])
+                if omzet_val == 0 and geld_val == 0: status_txt = "💤"
+                else: 
+                    status_txt = "✅"
+                    omzet = omzet_val
+            elif d < date.today(): status_txt = "❌"
+            status_list.append({"Datum": d.strftime("%d-%m"), "Dag": d.strftime("%a"), "Status": status_txt, "Omzet": f"€ {omzet:.2f}" if omzet > 0 else "-"})
+        st.dataframe(pd.DataFrame(status_list), hide_index=True, use_container_width=True)
+
 elif app_mode == "Kassaldo Beheer":
+    # (Bestaande code)
     st.header("💰 Kassaldo Beheer")
     st.info("Stel hier het initiële startsaldo in.")
     config = load_config()
@@ -506,6 +484,7 @@ elif app_mode == "Kassaldo Beheer":
         st.success("Opgeslagen!")
 
 elif app_mode == "Export (Yuki)":
+    # (Bestaande code)
     st.header("📤 Export Yuki")
     col_start, col_end = st.columns(2)
     start_date = col_start.date_input("Van", datetime(datetime.now().year, datetime.now().month, 1))
@@ -520,6 +499,7 @@ elif app_mode == "Export (Yuki)":
         else: st.warning("Geen data.")
 
 elif app_mode == "Export Configuratie":
+    # (Bestaande code)
     st.header("📤 Export Configuratie")
     current_export_config = load_export_config()
     source_options = ["Vast", "Veld"]
@@ -530,6 +510,7 @@ elif app_mode == "Export Configuratie":
         st.success("Opgeslagen!")
 
 elif app_mode == "Instellingen":
+    # (Bestaande code)
     st.header("⚙️ Rekeningen")
     current_settings = load_settings()
     edited_settings = st.data_editor(current_settings, hide_index=True, use_container_width=True, num_rows="fixed")
