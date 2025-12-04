@@ -20,32 +20,60 @@ ADMIN_PASSWORD = "Yuki2025!"
 
 st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="centered")
 
-# --- CSS STYLING ---
+# --- CSS STYLING (AANGEPAST: MENU KNOP TERUG ZICHTBAAR) ---
 st.markdown("""
     <style>
-    header {visibility: hidden;}
-    .block-container { padding-top: 1rem; padding-bottom: 2rem; }
+    /* We verbergen de header NIET meer volledig, anders is de menuknop weg. 
+       We maken de witruimte wel kleiner. */
+    .block-container { 
+        padding-top: 2rem; 
+        padding-bottom: 2rem; 
+    }
     
+    /* Styling voor de Info Kaarten */
     .info-card {
-        height: 50px; display: flex; align-items: center; justify-content: center;
-        border-radius: 8px; font-weight: bold; font-size: 0.95rem; margin-bottom: 10px;
+        height: 50px; 
+        display: flex; 
+        align-items: center; 
+        justify-content: center;
+        border-radius: 8px; 
+        font-weight: bold; 
+        font-size: 0.95rem; 
+        margin-bottom: 10px;
         border: 1px solid rgba(49, 51, 63, 0.1);
     }
+    
     .card-red   { background-color: #fce8e6; color: #a30f0f; }
     .card-green { background-color: #e6fcf5; color: #0f5132; }
     .card-grey  { background-color: #f0f2f6; color: #31333f; }
     .card-blue  { background-color: #e7f5ff; color: #004085; }
     
-    .day-header { text-align: center; font-size: 1.3rem; font-weight: 700; margin-bottom: 0px; color: #31333f; }
-    .sub-status { text-align: center; font-size: 0.85rem; margin-bottom: 5px; }
+    .day-header { 
+        text-align: center; 
+        font-size: 1.3rem; 
+        font-weight: 700; 
+        margin-bottom: 0px; 
+        color: #31333f; 
+    }
+    
+    .sub-status { 
+        text-align: center; 
+        font-size: 0.85rem; 
+        margin-bottom: 5px; 
+    }
     
     div.stButton > button { width: 100%; }
     div[data-testid="stDateInput"] { text-align: center; }
-    .streamlit-expanderHeader { background-color: #f8f9fa; border-radius: 5px; }
+    
+    /* Zorg dat de expander (Maandoverzicht) netjes aansluit */
+    .streamlit-expanderHeader {
+        background-color: #f8f9fa;
+        border-radius: 5px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNCTIES ---
+# --- FUNCTIES: CONFIG & SETTINGS ---
 
 def load_config():
     default_config = {"start_saldo": 0.0, "laatste_update": str(datetime.now().date())}
@@ -73,7 +101,7 @@ def get_default_settings():
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
         df = pd.read_csv(SETTINGS_FILE, dtype={"Rekening": str, "BtwCode": str})
-        # Auto-migratie correcties
+        # Auto-migratie
         if "Kas" in df["Code"].values:
             df.loc[df["Code"] == "Kas", "Code"] = "Cash"
             df.to_csv(SETTINGS_FILE, index=False)
@@ -93,7 +121,8 @@ def get_yuki_mapping():
     df = load_settings()
     return dict(zip(df.Code, df.Rekening))
 
-# --- EXPORT CONFIG ---
+# --- EXPORT CONFIGURATIE ---
+
 def get_default_export_config():
     return [
         {"Kolom": "Grootboekrekening kas", "Bron": "Vast", "Waarde": "570000"},
@@ -111,7 +140,8 @@ def get_default_export_config():
     ]
 
 def load_export_config():
-    if os.path.exists(EXPORT_CONFIG_FILE): return pd.read_csv(EXPORT_CONFIG_FILE)
+    if os.path.exists(EXPORT_CONFIG_FILE):
+        return pd.read_csv(EXPORT_CONFIG_FILE)
     else:
         df = pd.DataFrame(get_default_export_config())
         df.to_csv(EXPORT_CONFIG_FILE, index=False)
@@ -119,7 +149,8 @@ def load_export_config():
 
 def save_export_config(df): df.to_csv(EXPORT_CONFIG_FILE, index=False)
 
-# --- DATA ---
+# --- FUNCTIES: DATA ---
+
 def load_database():
     if os.path.exists(DATA_FILE):
         df = pd.read_csv(DATA_FILE)
@@ -186,6 +217,8 @@ def handle_save_click(datum, omschrijving, edited_df, som_omzet, som_geld, versc
     st.session_state.omschrijving = "" 
     st.session_state['show_success_toast'] = True
 
+# --- DYNAMISCHE EXPORT ENGINE ---
+
 def generate_flexible_export(start_date, end_date):
     df_data = load_database()
     export_config = load_export_config()
@@ -196,17 +229,22 @@ def generate_flexible_export(start_date, end_date):
     if selection.empty: return None
 
     export_rows = []
+    
     for index, row in selection.iterrows():
         if row['Totaal_Omzet'] == 0 and row['Totaal_Geld'] == 0: continue
+        
         datum_fmt = pd.to_datetime(row['Datum']).strftime('%d-%m-%Y')
         desc = row['Omschrijving']
         
         transactions = []
+        
+        # 1. OMZET
         if row['Omzet_21'] > 0: transactions.append({"Rek": CODES.get("Omzet_21"), "Bedrag": row['Omzet_21'], "Btw": "V21", "Note": "Omzet 21%"})
         if row['Omzet_12'] > 0: transactions.append({"Rek": CODES.get("Omzet_12"), "Bedrag": row['Omzet_12'], "Btw": "V12", "Note": "Omzet 12%"})
         if row['Omzet_6'] > 0:  transactions.append({"Rek": CODES.get("Omzet_6"),  "Bedrag": row['Omzet_6'],  "Btw": "V6",  "Note": "Omzet 6%"})
         if row['Omzet_0'] > 0:  transactions.append({"Rek": CODES.get("Omzet_0"),  "Bedrag": row['Omzet_0'],  "Btw": "V0",  "Note": "Omzet 0%"})
         
+        # 2. GELD
         if row['Geld_Bancontact'] > 0: transactions.append({"Rek": CODES.get("Bancontact"), "Bedrag": -row['Geld_Bancontact'], "Btw": "", "Note": "Betaling Bancontact"})
         if row['Geld_Payconiq'] > 0:   transactions.append({"Rek": CODES.get("Payconiq"),   "Bedrag": -row['Geld_Payconiq'],   "Btw": "", "Note": "Betaling Payconiq"})
         if row['Geld_Overschrijving'] > 0: transactions.append({"Rek": CODES.get("Oversch"), "Bedrag": -row['Geld_Overschrijving'], "Btw": "", "Note": "Betaling Overschrijving"})
@@ -452,6 +490,7 @@ elif app_mode == "Export Configuratie":
     st.header("📤 Export Configuratie")
     current_export_config = load_export_config()
     source_options = ["Vast", "Veld"]
+    internal_fields = ["Datum", "Omschrijving", "Bedrag", "Grootboekrekening", "BtwCode"]
     edited_export = st.data_editor(current_export_config, column_config={"Kolom": st.column_config.TextColumn("CSV Kolom", required=True), "Bron": st.column_config.SelectboxColumn("Type", options=source_options), "Waarde": st.column_config.TextColumn("Waarde")}, num_rows="dynamic", use_container_width=True, hide_index=True)
     if st.button("💾 Opslaan", type="primary"):
         save_export_config(edited_export)
@@ -464,4 +503,3 @@ elif app_mode == "Instellingen":
     if st.button("Opslaan", type="primary"):
         save_settings(edited_settings)
         st.success("Opgeslagen!")
-    
