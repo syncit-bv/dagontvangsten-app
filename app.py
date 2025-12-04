@@ -464,3 +464,4 @@ elif app_mode == "Instellingen":
     if st.button("Opslaan", type="primary"):
         save_settings(edited_settings)
         st.success("Opgeslagen!")
+    
