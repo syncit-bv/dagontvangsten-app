@@ -273,11 +273,9 @@ if app_mode == "Invoer":
         st.dataframe(pd.DataFrame(status_list), hide_index=True, use_container_width=True)
 
     # --- HEADER SECTIE ---
-    
     check_data = get_data_by_date(datum_geselecteerd)
     openings_saldo = calculate_current_saldo(datum_geselecteerd)
     
-    # Linksboven: Status
     if check_data is not None:
         omz = float(check_data['Totaal_Omzet'])
         gld = float(check_data['Totaal_Geld'])
@@ -288,29 +286,21 @@ if app_mode == "Invoer":
     else:
         status_html = "<div class='info-card card-red'>📝 NOG INVULLEN</div>"
 
-    # Rechtsboven: Saldo
     saldo_html = f"<div class='info-card card-grey'>💰 Saldo: € {openings_saldo:.2f}</div>"
-
-    # Midden: Dagnaam
     dag_naam = datum_geselecteerd.strftime("%A").upper()
-    if check_data is not None:
-        sub_txt, sub_col = "✅ Reeds verwerkt", "green"
-    elif datum_geselecteerd > datetime.now().date():
-        sub_txt, sub_col = "🔒 Toekomst", "grey"
-    else:
-        sub_txt, sub_col = "❌ Nog in te vullen", "red"
+    
+    if check_data is not None: sub_txt, sub_col = "✅ Reeds verwerkt", "green"
+    elif datum_geselecteerd > datetime.now().date(): sub_txt, sub_col = "🔒 Toekomst", "grey"
+    else: sub_txt, sub_col = "❌ Nog in te vullen", "red"
 
     col_left, col_center, col_right = st.columns([1.5, 2, 1.5])
-    
     with col_left:
         st.markdown(status_html, unsafe_allow_html=True)
         st.button("⬅️ Vorige", on_click=prev_day, use_container_width=True)
-        
     with col_center:
         st.markdown(f"<div class='day-header'>{dag_naam}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='sub-status' style='color:{sub_col}'>{sub_txt}</div>", unsafe_allow_html=True)
         st.date_input("Datum", value=st.session_state.date_picker_val, max_value=datetime.now().date(), label_visibility="collapsed", key="date_picker_val")
-
     with col_right:
         st.markdown(saldo_html, unsafe_allow_html=True)
         is_today = (datum_geselecteerd >= datetime.now().date())
@@ -337,27 +327,27 @@ if app_mode == "Invoer":
         else:
             def get_val(col_name): return float(existing_data.get(col_name, 0.0)) if is_overwrite_mode else 0.00
             
-            # --- HIER IS DE WIJZIGING: GEEN TUSSENREGELS MEER ---
+            # --- NIEUWE GRID: MET 'SECTIE' KOLOM EN ZONDER SEPARATORS ---
             data_items = []
-            if use_0:  data_items.append({"Label": "🎫 0% (Vrijgesteld)", "Bedrag": get_val("Omzet_0"), "Type": "Omzet"})
-            if use_6:  data_items.append({"Label": "🎫 6% (Voeding)",     "Bedrag": get_val("Omzet_6"), "Type": "Omzet"})
-            if use_12: data_items.append({"Label": "🎫 12% (Horeca)",     "Bedrag": get_val("Omzet_12"), "Type": "Omzet"})
-            if use_21: data_items.append({"Label": "🎫 21% (Algemeen)",   "Bedrag": get_val("Omzet_21"), "Type": "Omzet"})
+            if use_0:  data_items.append({"Sectie": "1. TICKET", "Label": "🎫 0% (Vrijgesteld)", "Bedrag": get_val("Omzet_0"), "Type": "Omzet"})
+            if use_6:  data_items.append({"Sectie": "1. TICKET", "Label": "🎫 6% (Voeding)",     "Bedrag": get_val("Omzet_6"), "Type": "Omzet"})
+            if use_12: data_items.append({"Sectie": "1. TICKET", "Label": "🎫 12% (Horeca)",     "Bedrag": get_val("Omzet_12"), "Type": "Omzet"})
+            if use_21: data_items.append({"Sectie": "1. TICKET", "Label": "🎫 21% (Algemeen)",   "Bedrag": get_val("Omzet_21"), "Type": "Omzet"})
             
-            # Direct door naar betaalmethoden (Geen separator meer!)
-            if use_bc:   data_items.append({"Label": "💳 Bancontact",     "Bedrag": get_val("Geld_Bancontact"), "Type": "Geld"})
-            if use_cash: data_items.append({"Label": "💶 Cash (Lade)",    "Bedrag": get_val("Geld_Cash"), "Type": "Geld"})
-            if use_payq: data_items.append({"Label": "📱 Payconiq",       "Bedrag": get_val("Geld_Payconiq"), "Type": "Geld"})
-            if use_over: data_items.append({"Label": "🏦 Overschrijving", "Bedrag": get_val("Geld_Overschrijving"), "Type": "Geld"})
-            if use_vouc: data_items.append({"Label": "🎁 Bonnen",         "Bedrag": get_val("Geld_Bonnen"), "Type": "Geld"})
+            # Direct door: geen separators
+            if use_bc:   data_items.append({"Sectie": "2. GELD", "Label": "💳 Bancontact",     "Bedrag": get_val("Geld_Bancontact"), "Type": "Geld"})
+            if use_cash: data_items.append({"Sectie": "2. GELD", "Label": "💶 Cash (Lade)",    "Bedrag": get_val("Geld_Cash"), "Type": "Geld"})
+            if use_payq: data_items.append({"Sectie": "2. GELD", "Label": "📱 Payconiq",       "Bedrag": get_val("Geld_Payconiq"), "Type": "Geld"})
+            if use_over: data_items.append({"Sectie": "2. GELD", "Label": "🏦 Overschrijving", "Bedrag": get_val("Geld_Overschrijving"), "Type": "Geld"})
+            if use_vouc: data_items.append({"Sectie": "2. GELD", "Label": "🎁 Bonnen",         "Bedrag": get_val("Geld_Bonnen"), "Type": "Geld"})
             
-            # Afstorting ook direct erachteraan
-            data_items.append({"Label": "🏧 Afstorting naar Bank",    "Bedrag": get_val("Geld_Afstorting"), "Type": "Afstorting"})
+            data_items.append({"Sectie": "3. BANK", "Label": "🏦 Afstorting",    "Bedrag": get_val("Geld_Afstorting"), "Type": "Afstorting"})
 
             df_start = pd.DataFrame(data_items)
             edited_df = st.data_editor(
                 df_start,
                 column_config={
+                    "Sectie": st.column_config.TextColumn("Groep", disabled=True), # Read-only groep kolom
                     "Label": st.column_config.TextColumn("Omschrijving", disabled=True),
                     "Bedrag": st.column_config.NumberColumn("Waarde (€)", min_value=0, format="%.2f"),
                     "Type": None
