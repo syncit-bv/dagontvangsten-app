@@ -127,6 +127,11 @@ def save_transaction(datum, omschrijving, df_input, totaal_omzet, totaal_geld, v
     datum_str = str(datum)
     df_db = df_db[df_db['Datum'] != datum_str]
     
+    # Als er geen df_input is (bij gesloten dag), maak dummy data
+    if df_input is None:
+        # Dummy DataFrame maken zodat de loop hieronder niet crasht
+        df_input = pd.DataFrame(columns=['Label', 'Bedrag'])
+
     if not omschrijving or omschrijving.strip() == "" or omschrijving == "nan":
         datum_fmt = pd.to_datetime(datum).strftime('%d-%m-%Y')
         omschrijving = f"Dagontvangsten {datum_fmt}"
@@ -178,6 +183,11 @@ def generate_yuki_export(start_date, end_date):
     CODES = get_yuki_mapping() 
     yuki_rows = []
     for index, row in selection.iterrows():
+        # FILTER: Als totaal 0 is (Sluitingsdag), slaan we de export over (of je boekt 0, maar meestal wil je niks)
+        # Hier kiezen we ervoor om niets te exporteren voor gesloten dagen.
+        if row['Totaal_Omzet'] == 0 and row['Totaal_Geld'] == 0:
+            continue
+
         datum_fmt = pd.to_datetime(row['Datum']).strftime('%d-%m-%Y')
         desc = row['Omschrijving'] 
         if not desc: desc = f"Dagontvangsten {datum_fmt}"
@@ -271,61 +281,51 @@ if app_mode == "Invoer":
             d_str = str(d)
             row = df_hist[df_hist['Datum'] == d_str]
             omzet = 0.0
+            status_txt = "⚪"
             if not row.empty:
-                status = "✅" 
-                omzet = float(row.iloc[0]['Totaal_Omzet'])
-            elif d < date.today(): status = "❌"
-            else: status = "⚪"
-            status_list.append({"Datum": d.strftime("%d-%m"), "Dag": d.strftime("%a"), "Status": status, "Omzet": f"€ {omzet:.2f}" if omzet > 0 else "-"})
+                omzet_val = float(row.iloc[0]['Totaal_Omzet'])
+                geld_val = float(row.iloc[0]['Totaal_Geld'])
+                
+                if omzet_val == 0 and geld_val == 0:
+                    status_txt = "💤" # Gesloten / Rustdag
+                else:
+                    status_txt = "✅" # Gedaan
+                    omzet = omzet_val
+            elif d < date.today(): 
+                status_txt = "❌" # Te laat
+            
+            status_list.append({"Datum": d.strftime("%d-%m"), "Dag": d.strftime("%a"), "Status": status_txt, "Omzet": f"€ {omzet:.2f}" if omzet > 0 else "-"})
         st.dataframe(pd.DataFrame(status_list), hide_index=True, use_container_width=True)
 
-    # --- DATUM & STATUS SECTIE (HERSTELD!) ---
-    
-    # 1. Bepaal status
+    # --- DATUM & STATUS ---
     datum_geselecteerd = st.session_state.current_date
     check_data = get_data_by_date(datum_geselecteerd)
     
     if check_data is not None:
-        status_icon = "✅"
-        status_text = "Reeds ingevuld"
-        status_color = "green"
+        if float(check_data['Totaal_Omzet']) == 0 and float(check_data['Totaal_Geld']) == 0:
+            status_icon, status_text, status_color = "💤", "Sluitingsdag / Inactief", "blue"
+        else:
+            status_icon, status_text, status_color = "✅", "Reeds ingevuld", "green"
     elif datum_geselecteerd > datetime.now().date():
-        status_icon = "🔒"
-        status_text = "Toekomst"
-        status_color = "grey"
+        status_icon, status_text, status_color = "🔒", "Toekomst", "grey"
     else:
-        status_icon = "❌"
-        status_text = "Nog in te vullen"
-        status_color = "red"
+        status_icon, status_text, status_color = "❌", "Nog in te vullen", "red"
 
     dag_naam = datum_geselecteerd.strftime("%A").upper()
 
-    # 2. De Layout
     col_prev, col_pick, col_next = st.columns([1, 2, 1])
-    
-    with col_prev:
-        st.button("⬅️ Vorige", on_click=prev_day, use_container_width=True)
-        
+    with col_prev: st.button("⬅️ Vorige", on_click=prev_day, use_container_width=True)
     with col_pick:
-        st.date_input(
-            "Datum", 
-            value=datum_geselecteerd, 
-            max_value=datetime.now().date(), 
-            label_visibility="collapsed", 
-            key="date_picker_val", 
-            on_change=update_date
-        )
-        # HIER IS HET HERSTELD:
+        st.date_input("Datum", value=datum_geselecteerd, max_value=datetime.now().date(), label_visibility="collapsed", key="date_picker_val", on_change=update_date)
         st.markdown(f"<div style='text-align: center; font-weight: bold; font-size: 1.1em;'>{dag_naam}</div>", unsafe_allow_html=True)
         st.markdown(f"<div style='text-align: center; color: {status_color}; font-size: 0.9em; margin-bottom: 10px;'>{status_icon} {status_text}</div>", unsafe_allow_html=True)
-
     with col_next:
         is_today = (datum_geselecteerd >= datetime.now().date())
         st.button("Volgende ➡️", on_click=next_day, disabled=is_today, use_container_width=True)
 
     st.divider()
 
-    # --- SALDO BEREKENING ---
+    # --- SALDO ---
     openings_saldo = calculate_current_saldo(datum_geselecteerd)
 
     # --- INVOER ---
@@ -338,59 +338,85 @@ if app_mode == "Invoer":
         omschr_value = existing_data.get("Omschrijving", "") if is_overwrite_mode else ""
         omschrijving = st.text_input("Omschrijving", value=omschr_value, placeholder=f"Dagontvangsten {datum_geselecteerd.strftime('%d-%m-%Y')}", key=f"omschr_{datum_geselecteerd}")
 
-        def get_val(col_name): return float(existing_data.get(col_name, 0.0)) if is_overwrite_mode else 0.00
-
-        data_items = []
-        if use_0:  data_items.append({"Label": "🎫 0% (Vrijgesteld)", "Bedrag": get_val("Omzet_0"), "Type": "Omzet"})
-        if use_6:  data_items.append({"Label": "🎫 6% (Voeding)",     "Bedrag": get_val("Omzet_6"), "Type": "Omzet"})
-        if use_12: data_items.append({"Label": "🎫 12% (Horeca)",     "Bedrag": get_val("Omzet_12"), "Type": "Omzet"})
-        if use_21: data_items.append({"Label": "🎫 21% (Algemeen)",   "Bedrag": get_val("Omzet_21"), "Type": "Omzet"})
-
-        data_items.append({"Label": "⬇️ --- BETAALWIJZEN --- ⬇️", "Bedrag": None, "Type": "Separator"})
-
-        if use_bc:   data_items.append({"Label": "💳 Bancontact",     "Bedrag": get_val("Geld_Bancontact"), "Type": "Geld"})
-        if use_cash: data_items.append({"Label": "💶 Cash (Lade)",    "Bedrag": get_val("Geld_Cash"), "Type": "Geld"})
-        if use_payq: data_items.append({"Label": "📱 Payconiq",       "Bedrag": get_val("Geld_Payconiq"), "Type": "Geld"})
-        if use_over: data_items.append({"Label": "🏦 Overschrijving", "Bedrag": get_val("Geld_Overschrijving"), "Type": "Geld"})
-        if use_vouc: data_items.append({"Label": "🎁 Bonnen",         "Bedrag": get_val("Geld_Bonnen"), "Type": "Geld"})
+        # HIER IS DE CHECKBOX VOOR INACTIVITEIT
+        is_gesloten = st.checkbox("🚫 Zaak gesloten / Geen ontvangsten", value=False)
         
-        data_items.append({"Label": "⬇️ --- KAS UITGAVEN --- ⬇️", "Bedrag": None, "Type": "Separator"})
-        data_items.append({"Label": "🏦 Afstorting naar Bank",    "Bedrag": get_val("Geld_Afstorting"), "Type": "Afstorting"})
+        # Als we data laden die 0 is, vinken we dit automatisch aan (gemak)
+        if is_overwrite_mode and not is_gesloten:
+            if float(existing_data['Totaal_Omzet']) == 0 and float(existing_data['Totaal_Geld']) == 0:
+                is_gesloten = True
 
-        df_start = pd.DataFrame(data_items)
-        
-        edited_df = st.data_editor(
-            df_start,
-            column_config={
-                "Label": st.column_config.TextColumn("Omschrijving", disabled=True),
-                "Bedrag": st.column_config.NumberColumn("Waarde (€)", min_value=0, format="%.2f"),
-                "Type": None
-            },
-            hide_index=True, use_container_width=True, num_rows="fixed",
-            height=(len(data_items) * 35) + 38,
-            key=f"editor_{datum_geselecteerd}_{st.session_state.reset_count}"
-        )
+        if is_gesloten:
+            # GESLOTEN MODUS
+            st.info("De zaak is gemarkeerd als gesloten. Alle waarden worden op € 0,00 gezet.")
+            
+            # Dummy waarden voor logica
+            som_omzet, som_geld, verschil, cash_in_today, cash_out_today = 0.0, 0.0, 0.0, 0.0, 0.0
+            edited_df = None # Geen data om op te slaan uit editor
+            
+            # Automatische omschrijving aanpassen indien leeg
+            if not omschrijving: omschrijving = "SLUITINGSDAG"
 
-        regels = edited_df[edited_df["Type"] != "Separator"].copy()
-        regels["Bedrag"] = regels["Bedrag"].fillna(0.0)
+        else:
+            # NORMALE INVOER MODUS
+            def get_val(col_name): return float(existing_data.get(col_name, 0.0)) if is_overwrite_mode else 0.00
+
+            data_items = []
+            if use_0:  data_items.append({"Label": "🎫 0% (Vrijgesteld)", "Bedrag": get_val("Omzet_0"), "Type": "Omzet"})
+            if use_6:  data_items.append({"Label": "🎫 6% (Voeding)",     "Bedrag": get_val("Omzet_6"), "Type": "Omzet"})
+            if use_12: data_items.append({"Label": "🎫 12% (Horeca)",     "Bedrag": get_val("Omzet_12"), "Type": "Omzet"})
+            if use_21: data_items.append({"Label": "🎫 21% (Algemeen)",   "Bedrag": get_val("Omzet_21"), "Type": "Omzet"})
+
+            data_items.append({"Label": "⬇️ --- BETAALWIJZEN --- ⬇️", "Bedrag": None, "Type": "Separator"})
+
+            if use_bc:   data_items.append({"Label": "💳 Bancontact",     "Bedrag": get_val("Geld_Bancontact"), "Type": "Geld"})
+            if use_cash: data_items.append({"Label": "💶 Cash (Lade)",    "Bedrag": get_val("Geld_Cash"), "Type": "Geld"})
+            if use_payq: data_items.append({"Label": "📱 Payconiq",       "Bedrag": get_val("Geld_Payconiq"), "Type": "Geld"})
+            if use_over: data_items.append({"Label": "🏦 Overschrijving", "Bedrag": get_val("Geld_Overschrijving"), "Type": "Geld"})
+            if use_vouc: data_items.append({"Label": "🎁 Bonnen",         "Bedrag": get_val("Geld_Bonnen"), "Type": "Geld"})
+            
+            data_items.append({"Label": "⬇️ --- KAS UITGAVEN --- ⬇️", "Bedrag": None, "Type": "Separator"})
+            data_items.append({"Label": "🏦 Afstorting naar Bank",    "Bedrag": get_val("Geld_Afstorting"), "Type": "Afstorting"})
+
+            df_start = pd.DataFrame(data_items)
+            
+            edited_df = st.data_editor(
+                df_start,
+                column_config={
+                    "Label": st.column_config.TextColumn("Omschrijving", disabled=True),
+                    "Bedrag": st.column_config.NumberColumn("Waarde (€)", min_value=0, format="%.2f"),
+                    "Type": None
+                },
+                hide_index=True, use_container_width=True, num_rows="fixed",
+                height=(len(data_items) * 35) + 38,
+                key=f"editor_{datum_geselecteerd}_{st.session_state.reset_count}"
+            )
+
+            regels = edited_df[edited_df["Type"] != "Separator"].copy()
+            regels["Bedrag"] = regels["Bedrag"].fillna(0.0)
+            
+            som_omzet = regels[regels["Type"] == "Omzet"]["Bedrag"].sum()
+            som_geld = regels[regels["Type"] == "Geld"]["Bedrag"].sum()
+            verschil = round(som_omzet - som_geld, 2)
+            
+            cash_in_today = regels[regels["Label"] == "💶 Cash (Lade)"]["Bedrag"].sum()
+            cash_out_today = regels[regels["Type"] == "Afstorting"]["Bedrag"].sum()
+
+        # EINDE IF/ELSE GESLOTEN
         
-        som_omzet = regels[regels["Type"] == "Omzet"]["Bedrag"].sum()
-        som_geld = regels[regels["Type"] == "Geld"]["Bedrag"].sum()
-        verschil = round(som_omzet - som_geld, 2)
-        
-        cash_in_today = regels[regels["Label"] == "💶 Cash (Lade)"]["Bedrag"].sum()
-        cash_out_today = regels[regels["Type"] == "Afstorting"]["Bedrag"].sum()
         eind_saldo = openings_saldo + cash_in_today - cash_out_today
 
         st.markdown("---")
         
         c_links, c_rechts = st.columns(2)
         with c_links:
-            st.markdown("#### 📊 Balans Check")
-            if verschil == 0 and som_omzet > 0:
-                st.success(f"✅ OK: € {som_omzet:.2f}")
+            st.markdown("#### 📊 Dag Controle")
+            if is_gesloten:
+                st.info("Status: Gesloten (0.00)")
+            elif verschil == 0 and som_omzet > 0:
+                st.success(f"✅ Balans OK: € {som_omzet:.2f}")
             elif som_omzet == 0:
-                st.info("Vul gegevens in")
+                st.info("Nog in te vullen")
             else:
                 st.error(f"❌ Verschil: € {verschil:.2f}")
 
@@ -407,7 +433,9 @@ if app_mode == "Invoer":
         if is_overwrite_mode:
             overwrite_confirmed = st.checkbox("Ik wil wijzigingen opslaan", value=False)
             
-        is_valid = (som_omzet > 0) and (verschil == 0) and overwrite_confirmed
+        # Validatie: OF (Normaal en Klopt) OF (Gesloten)
+        is_valid = ((som_omzet > 0 and verschil == 0) or is_gesloten) and overwrite_confirmed
+        
         label = "🔄 Opslaan" if is_overwrite_mode else "💾 Opslaan"
         
         st.button(label, type="primary", disabled=not is_valid, use_container_width=True,
@@ -415,6 +443,7 @@ if app_mode == "Invoer":
                   args=(datum_geselecteerd, omschrijving, edited_df, som_omzet, som_geld, verschil))
 
 elif app_mode == "Kassaldo Beheer":
+    # (Zelfde als voorheen)
     st.header("💰 Kassaldo Beheer")
     st.info("Stel hier het initiële startsaldo in.")
     config = load_config()
