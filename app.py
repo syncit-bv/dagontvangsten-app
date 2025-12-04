@@ -20,22 +20,12 @@ ADMIN_PASSWORD = "Yuki2025!"
 
 st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="centered")
 
-# --- CSS STYLING (FIXED: Transparante Header) ---
+# --- CSS STYLING ---
 st.markdown("""
     <style>
-    /* 1. Header Transparant Maken (Zodat hij niet over tekst heen komt) */
-    header[data-testid="stHeader"] {
-        background-color: transparent !important;
-        z-index: 1; /* Zorg dat de menuknop wel bovenop blijft liggen */
-    }
+    header {visibility: hidden;}
+    .block-container { padding-top: 1rem; padding-bottom: 2rem; }
     
-    /* 2. Inhoud naar boven trekken, maar ruimte laten voor de menuknop */
-    .block-container { 
-        padding-top: 2.5rem !important; 
-        padding-bottom: 2rem; 
-    }
-    
-    /* 3. Styling van de Info Kaarten */
     .info-card {
         height: 50px; display: flex; align-items: center; justify-content: center;
         border-radius: 8px; font-weight: bold; font-size: 0.95rem; margin-bottom: 10px;
@@ -77,19 +67,32 @@ def get_default_settings():
         {"Code": "Payconiq",   "Label": "Payconiq",        "Rekening": "580000", "BtwCode": "",    "Type": "Debet"},
         {"Code": "Oversch",    "Label": "Overschrijving",  "Rekening": "580000", "BtwCode": "",    "Type": "Debet"},
         {"Code": "Bonnen",     "Label": "Cadeaubonnen",    "Rekening": "440000", "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Afstorting", "Label": "Afstorting Bank", "Rekening": "550000", "BtwCode": "",    "Type": "Credit"},
+        {"Code": "Afstorting", "Label": "Afstorting Bank", "Rekening": "580000", "BtwCode": "",    "Type": "Credit"},
     ]
 
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
         df = pd.read_csv(SETTINGS_FILE, dtype={"Rekening": str, "BtwCode": str})
+        
+        # --- AUTO-MIGRATIE LOGICA ---
+        # 1. Kas -> Cash
         if "Kas" in df["Code"].values:
             df.loc[df["Code"] == "Kas", "Code"] = "Cash"
             df.to_csv(SETTINGS_FILE, index=False)
+            
+        # 2. Toevoegen Overschrijving (indien ontbreekt)
         if "Oversch" not in df["Code"].values:
             new_row = {"Code": "Oversch", "Label": "Overschrijving", "Rekening": "580000", "BtwCode": "", "Type": "Debet"}
             df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
             df.to_csv(SETTINGS_FILE, index=False)
+            
+        # 3. TOEGEVOEGD: Check of 'Afstorting' bestaat, zo nee: toevoegen
+        if "Afstorting" not in df["Code"].values:
+            new_row = {"Code": "Afstorting", "Label": "Afstorting Bank", "Rekening": "580000", "BtwCode": "", "Type": "Credit"}
+            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+            df.to_csv(SETTINGS_FILE, index=False)
+            st.toast("Instellingen bijgewerkt: 'Afstorting' toegevoegd", icon="🛠️")
+            
         return df
     else:
         df = pd.DataFrame(get_default_settings())
@@ -100,7 +103,6 @@ def load_settings():
 def save_settings(df_settings): df_settings.to_csv(SETTINGS_FILE, index=False)
 def get_yuki_mapping():
     df = load_settings()
-    # Mapping voor Codes en Labels
     rekening_map = dict(zip(df.Code, df.Rekening))
     label_map = dict(zip(df.Code, df.Label))
     return rekening_map, label_map
@@ -238,11 +240,13 @@ def generate_flexible_export(start_date, end_date):
                 "Rek": rekening, "Bedrag": bedrag, "Btw": btw, "Note": note, "Type": trx_type
             })
 
+        # 1. OMZET
         if row['Omzet_21'] > 0: add_trx("Omzet_21", row['Omzet_21'], "V21", "Omzet", "Omzet 21%")
         if row['Omzet_12'] > 0: add_trx("Omzet_12", row['Omzet_12'], "V12", "Omzet", "Omzet 12%")
         if row['Omzet_6'] > 0:  add_trx("Omzet_6",  row['Omzet_6'],  "V6",  "Omzet", "Omzet 6%")
         if row['Omzet_0'] > 0:  add_trx("Omzet_0",  row['Omzet_0'],  "V0",  "Omzet", "Omzet 0%")
         
+        # 2. GELD
         if row['Geld_Bancontact'] > 0:   add_trx("Bancontact", -row['Geld_Bancontact'], "", "Payment")
         if row['Geld_Payconiq'] > 0:     add_trx("Payconiq",   -row['Geld_Payconiq'],   "", "Payment")
         if row['Geld_Overschrijving'] > 0: add_trx("Oversch",  -row['Geld_Overschrijving'], "", "Payment")
