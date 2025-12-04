@@ -27,13 +27,19 @@ st.markdown("""
     .stAlert { margin-top: 1rem; }
     div.stButton > button { width: 100%; }
     
-    .saldo-box {
-        padding: 15px;
-        background-color: #f0f2f6;
-        border-radius: 10px;
-        margin-bottom: 20px;
-        border-left: 5px solid #ff4b4b;
+    /* Styling voor status boxjes */
+    .status-box {
+        padding: 8px;
+        border-radius: 5px;
+        text-align: center;
+        font-weight: bold;
+        font-size: 0.9em;
+        margin-bottom: 10px;
     }
+    .status-green { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .status-red { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .status-grey { background-color: #e2e3e5; color: #383d41; border: 1px solid #d6d8db; }
+    .status-blue { background-color: #cce5ff; color: #004085; border: 1px solid #b8daff; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -203,21 +209,22 @@ def generate_yuki_export(start_date, end_date):
 
     return pd.DataFrame(yuki_rows, columns=["Datum", "Grootboekrekening", "Omschrijving", "Bedrag", "BtwCode"])
 
-# --- STATE MANAGEMENT (FIXED: Single Source of Truth) ---
+# --- STATE MANAGEMENT ---
 if 'reset_count' not in st.session_state: st.session_state.reset_count = 0
 if 'show_success_toast' not in st.session_state: st.session_state['show_success_toast'] = False
+if 'date_picker_val' not in st.session_state: st.session_state.date_picker_val = datetime.now().date()
 
-# We gebruiken enkel date_picker_val als de waarheid.
-if 'date_picker_val' not in st.session_state:
-    st.session_state.date_picker_val = datetime.now().date()
-
-# Navigatie functies manipuleren DIRECT de state van de widget
+# Navigatie functies
 def prev_day(): 
     st.session_state.date_picker_val -= timedelta(days=1)
 
 def next_day(): 
     if st.session_state.date_picker_val < datetime.now().date():
         st.session_state.date_picker_val += timedelta(days=1)
+
+def update_date(): 
+    # Deze functie is gekoppeld aan de on_change van de datepicker
+    pass # De value wordt automatisch geupdate in session_state
 
 # ==========================================
 # ⚙️ SIDEBAR
@@ -268,11 +275,60 @@ if app_mode == "Invoer":
         st.toast("Succesvol opgeslagen!", icon="✅")
         st.session_state['show_success_toast'] = False
 
-    # Huidige datum uit state halen
+    # Huidige datum uit state
     datum_geselecteerd = st.session_state.date_picker_val
 
-    # MAAND OVERZICHT
-    with st.expander("📅 Status Maandoverzicht", expanded=False):
+    # --- DATUM & HEADER SECTIE ---
+    
+    # 1. Bepaal status van DEZE dag
+    check_data = get_data_by_date(datum_geselecteerd)
+    
+    if check_data is not None:
+        if float(check_data['Totaal_Omzet']) == 0 and float(check_data['Totaal_Geld']) == 0:
+            status_html = "<div class='status-box status-blue'>💤 SLUITINGSDAG</div>"
+        else:
+            status_html = "<div class='status-box status-green'>✅ REEDS INGEVULD</div>"
+    elif datum_geselecteerd > datetime.now().date():
+        status_html = "<div class='status-box status-grey'>🔒 TOEKOMST</div>"
+    else:
+        status_html = "<div class='status-box status-red'>❌ NOG IN TE VULLEN</div>"
+
+    dag_naam = datum_geselecteerd.strftime("%A").upper()
+    datum_mooi = datum_geselecteerd.strftime("%d %B %Y")
+
+    # 2. De Layout: 3 kolommen
+    col_left, col_center, col_right = st.columns([1.5, 2, 1.5])
+    
+    with col_left:
+        # HIER STAAT NU DE STATUS LINKS
+        st.markdown(status_html, unsafe_allow_html=True)
+        st.button("⬅️ Vorige dag", on_click=prev_day, use_container_width=True)
+        
+    with col_center:
+        # HIER STAAT DE DAGNAAM & DATUMPICKER (Ingeklapt)
+        st.markdown(f"<h2 style='text-align: center; margin:0; padding:0;'>{dag_naam}</h2>", unsafe_allow_html=True)
+        
+        # De datepicker staat hieronder, gecentreerd (visueel)
+        st.date_input(
+            "Selecteer datum", 
+            value=st.session_state.date_picker_val, 
+            max_value=datetime.now().date(), 
+            label_visibility="collapsed", 
+            key="date_picker_val", # Koppeling met state
+            on_change=update_date
+        )
+
+    with col_right:
+        # RECHTS DE VOLGENDE KNOP
+        is_today = (datum_geselecteerd >= datetime.now().date())
+        # Placeholder om button op zelfde hoogte te krijgen als vorige
+        st.markdown("<div style='height: 42px;'></div>", unsafe_allow_html=True) 
+        st.button("Volgende dag ➡️", on_click=next_day, disabled=is_today, use_container_width=True)
+
+    st.divider()
+
+    # --- MAAND OVERZICHT (Uitklapbaar) ---
+    with st.expander("🔍 Bekijk maandoverzicht"):
         huidige_maand = datum_geselecteerd.month
         huidig_jaar = datum_geselecteerd.year
         df_hist = load_database()
@@ -298,47 +354,12 @@ if app_mode == "Invoer":
             status_list.append({"Datum": d.strftime("%d-%m"), "Dag": d.strftime("%a"), "Status": status_txt, "Omzet": f"€ {omzet:.2f}" if omzet > 0 else "-"})
         st.dataframe(pd.DataFrame(status_list), hide_index=True, use_container_width=True)
 
-    # --- DATUM & STATUS ---
-    check_data = get_data_by_date(datum_geselecteerd)
-    
-    if check_data is not None:
-        if float(check_data['Totaal_Omzet']) == 0 and float(check_data['Totaal_Geld']) == 0:
-            status_icon, status_text, status_color = "💤", "Sluitingsdag", "blue"
-        else:
-            status_icon, status_text, status_color = "✅", "Reeds ingevuld", "green"
-    elif datum_geselecteerd > datetime.now().date():
-        status_icon, status_text, status_color = "🔒", "Toekomst", "grey"
-    else:
-        status_icon, status_text, status_color = "❌", "Nog in te vullen", "red"
-
-    dag_naam = datum_geselecteerd.strftime("%A").upper()
-
-    col_prev, col_pick, col_next = st.columns([1, 2, 1])
-    with col_prev: st.button("⬅️ Vorige", on_click=prev_day, use_container_width=True)
-    with col_pick:
-        # HIER ZAT DE FOUT: value=... moet EXACT de key zijn.
-        # We gebruiken de key 'date_picker_val' om de state te delen.
-        st.date_input(
-            "Datum", 
-            value=st.session_state.date_picker_val, # Expliciet koppelen aan state
-            max_value=datetime.now().date(), 
-            label_visibility="collapsed", 
-            key="date_picker_val" # Dezelfde key als in state
-        )
-        st.markdown(f"<div style='text-align: center; font-weight: bold; font-size: 1.1em;'>{dag_naam}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div style='text-align: center; color: {status_color}; font-size: 0.9em; margin-bottom: 10px;'>{status_icon} {status_text}</div>", unsafe_allow_html=True)
-    with col_next:
-        is_today = (datum_geselecteerd >= datetime.now().date())
-        st.button("Volgende ➡️", on_click=next_day, disabled=is_today, use_container_width=True)
-
-    st.divider()
-
     # --- SALDO ---
     openings_saldo = calculate_current_saldo(datum_geselecteerd)
 
-    # --- INVOER ---
+    # --- INVOER FORMULIER ---
     if datum_geselecteerd > datetime.now().date():
-        st.error("Toekomst geblokkeerd.")
+        st.info("📅 Deze dag ligt in de toekomst.")
     else:
         existing_data = get_data_by_date(datum_geselecteerd)
         is_overwrite_mode = existing_data is not None
@@ -346,7 +367,7 @@ if app_mode == "Invoer":
         omschr_value = existing_data.get("Omschrijving", "") if is_overwrite_mode else ""
         omschrijving = st.text_input("Omschrijving", value=omschr_value, placeholder=f"Dagontvangsten {datum_geselecteerd.strftime('%d-%m-%Y')}", key=f"omschr_{datum_geselecteerd}")
 
-        # HIER IS DE CHECKBOX VOOR INACTIVITEIT
+        # INACTIVITEIT
         is_gesloten = st.checkbox("🚫 Zaak gesloten / Geen ontvangsten", value=False)
         
         if is_overwrite_mode and not is_gesloten:
@@ -354,7 +375,7 @@ if app_mode == "Invoer":
                 is_gesloten = True
 
         if is_gesloten:
-            st.info("Status: Gesloten")
+            st.warning("⚠️ Status: GESLOTEN (Alles € 0,00)")
             som_omzet, som_geld, verschil, cash_in_today, cash_out_today = 0.0, 0.0, 0.0, 0.0, 0.0
             edited_df = None 
             if not omschrijving: omschrijving = "SLUITINGSDAG"
@@ -439,6 +460,7 @@ if app_mode == "Invoer":
                   args=(datum_geselecteerd, omschrijving, edited_df, som_omzet, som_geld, verschil))
 
 elif app_mode == "Kassaldo Beheer":
+    # (Zelfde als voorheen)
     st.header("💰 Kassaldo Beheer")
     st.info("Stel hier het initiële startsaldo in.")
     config = load_config()
@@ -450,6 +472,7 @@ elif app_mode == "Kassaldo Beheer":
         st.success("Opgeslagen!")
 
 elif app_mode == "Export (Yuki)":
+    # (Zelfde als voorheen)
     st.header("📤 Export Yuki")
     col_start, col_end = st.columns(2)
     start_date = col_start.date_input("Van", datetime(datetime.now().year, datetime.now().month, 1))
@@ -464,6 +487,7 @@ elif app_mode == "Export (Yuki)":
         else: st.warning("Geen data.")
 
 elif app_mode == "Instellingen":
+    # (Zelfde als voorheen)
     st.header("⚙️ Rekeningen")
     current_settings = load_settings()
     edited_settings = st.data_editor(current_settings, hide_index=True, use_container_width=True, num_rows="fixed")
