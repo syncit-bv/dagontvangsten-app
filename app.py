@@ -151,4 +151,177 @@ def generate_yuki_export(start_date, end_date):
 # --- STATE ---
 if 'reset_count' not in st.session_state: st.session_state.reset_count = 0
 if 'show_success_toast' not in st.session_state: st.session_state['show_success_toast'] = False
-if 'current
+if 'current_date' not in st.session_state: st.session_state.current_date = datetime.now().date()
+
+def prev_day(): st.session_state.current_date -= timedelta(days=1)
+def next_day(): st.session_state.current_date += timedelta(days=1)
+def update_date(): st.session_state.current_date = st.session_state.date_picker_val
+
+# ==========================================
+# ⚙️ SIDEBAR
+# ==========================================
+with st.sidebar:
+    st.header("⚙️ Menu")
+    pwd = st.text_input("Boekhouder Login", type="password", placeholder="Wachtwoord")
+    is_admin = (pwd == ADMIN_PASSWORD)
+    app_mode = "Invoer" 
+    if is_admin:
+        st.success("🔓 Toegang verleend")
+        app_mode = st.radio("Kies scherm:", ["Invoer", "Export (Yuki)", "Instellingen"])
+        st.divider()
+        if os.path.exists(DATA_FILE):
+             with open(DATA_FILE, "rb") as f:
+                st.download_button("📥 Backup (.csv)", f, "backup_db.csv", "text/csv")
+    st.divider()
+    if app_mode == "Invoer":
+        st.subheader("Profiel & Sector")
+        sector_keuze = st.selectbox(
+            "Kies uw activiteit:", 
+            ["Detailhandel (Standaard)", "Huisarts/Kiné (Medisch)", "Tandarts (Gemengd)", "Horeca/Café", "Bakkerij"]
+        )
+        st.caption(f"Actief profiel: {sector_keuze}")
+        
+        # Defaults
+        def_0, def_6, def_12, def_21 = True, True, False, True 
+        if "Medisch" in sector_keuze: def_0, def_6, def_12, def_21 = True, False, False, False
+        elif "Tandarts" in sector_keuze: def_0, def_6, def_12, def_21 = True, False, False, True
+        elif "Horeca" in sector_keuze: def_0, def_6, def_12, def_21 = False, False, True, True
+        elif "Bakkerij" in sector_keuze: def_0, def_6, def_12, def_21 = False, True, False, True
+            
+        st.markdown("---")
+        st.write("**BTW Configuratie:**")
+        use_0  = st.checkbox("0% (Vrijgesteld)", value=def_0)
+        use_6  = st.checkbox("6% (Voeding/Krant)", value=def_6)
+        use_12 = st.checkbox("12% (Horeca/Maaltijd)", value=def_12)
+        use_21 = st.checkbox("21% (Algemeen/Drank)", value=def_21)
+        st.markdown("---")
+        st.write("**Betaalopties:**")
+        use_bc   = st.checkbox("Bancontact", value=True)
+        use_cash = st.checkbox("Cash", value=True)
+        use_payq = st.checkbox("Payconiq", value=True)
+        use_vouc = st.checkbox("Cadeaubonnen", value=False)
+
+# ==========================================
+# 📅 HOOFDSCHERM
+# ==========================================
+
+if app_mode == "Invoer":
+    if st.session_state['show_success_toast']:
+        st.toast("Succesvol opgeslagen!", icon="✅")
+        st.session_state['show_success_toast'] = False
+
+    # DATUM NAVIGATIE
+    check_data = get_data_by_date(st.session_state.current_date)
+    status_icon = "🟢" if check_data is not None else "⚪"
+    status_text = "Ingevuld" if check_data is not None else "Nog leeg"
+    dag_naam = st.session_state.current_date.strftime("%A").upper()
+    
+    col_prev, col_pick, col_next = st.columns([1, 2, 1])
+    with col_prev: st.button("⬅️ Vorige", on_click=prev_day, use_container_width=True)
+    with col_pick:
+        selected_date = st.date_input("Datum", value=st.session_state.current_date, label_visibility="collapsed", key="date_picker_val", on_change=update_date)
+        st.markdown(f"<div style='text-align: center; font-weight: bold; font-size: 1.1em;'>{dag_naam}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align: center; color: grey; font-size: 0.9em;'>{status_icon} {status_text}</div>", unsafe_allow_html=True)
+    with col_next: st.button("Volgende ➡️", on_click=next_day, use_container_width=True)
+
+    st.divider()
+
+    datum = st.session_state.current_date
+    existing_data = get_data_by_date(datum)
+    is_overwrite_mode = existing_data is not None
+
+    # HIER IS HET TEKSTVELD
+    # Als er data is, halen we die op. Als die leeg is (of 'nan' was en nu "" is), is het "".
+    # De placeholder toont wat er gebeurt als je niks invult.
+    omschr_value = ""
+    if is_overwrite_mode:
+        omschr_value = existing_data.get("Omschrijving", "")
+    
+    omschrijving = st.text_input(
+        "Omschrijving", 
+        value=omschr_value, 
+        placeholder=f"Standaard: Dagontvangsten {datum.strftime('%d-%m-%Y')}", 
+        key=f"omschr_{datum}"
+    )
+
+    def get_val(col_name):
+        return float(existing_data.get(col_name, 0.0)) if is_overwrite_mode else 0.00
+
+    # DATA GRID
+    data_items = []
+    if use_0:  data_items.append({"Label": "🎫 0% (Vrijgesteld)", "Bedrag": get_val("Omzet_0"), "Type": "Omzet"})
+    if use_6:  data_items.append({"Label": "🎫 6% (Voeding)",     "Bedrag": get_val("Omzet_6"), "Type": "Omzet"})
+    if use_12: data_items.append({"Label": "🎫 12% (Horeca)",     "Bedrag": get_val("Omzet_12"), "Type": "Omzet"})
+    if use_21: data_items.append({"Label": "🎫 21% (Algemeen)",   "Bedrag": get_val("Omzet_21"), "Type": "Omzet"})
+
+    data_items.append({"Label": "⬇️ --- LADE INHOUD --- ⬇️", "Bedrag": None, "Type": "Separator"})
+
+    if use_bc:   data_items.append({"Label": "💳 Bancontact",   "Bedrag": get_val("Geld_Bancontact"), "Type": "Geld"})
+    if use_cash: data_items.append({"Label": "💶 Cash",         "Bedrag": get_val("Geld_Cash"), "Type": "Geld"})
+    if use_payq: data_items.append({"Label": "📱 Payconiq",     "Bedrag": get_val("Geld_Payconiq"), "Type": "Geld"})
+    if use_vouc: data_items.append({"Label": "🎁 Bonnen",       "Bedrag": get_val("Geld_Bonnen"), "Type": "Geld"})
+
+    df_start = pd.DataFrame(data_items)
+    
+    overwrite_confirmed = True
+    if is_overwrite_mode:
+        st.info(f"✏️ Bewerkingsmodus")
+        overwrite_confirmed = st.checkbox("Ik wil wijzigingen opslaan", value=False)
+
+    edited_df = st.data_editor(
+        df_start,
+        column_config={
+            "Label": st.column_config.TextColumn("Omschrijving", disabled=True),
+            "Bedrag": st.column_config.NumberColumn("Waarde (€)", min_value=0, format="%.2f"),
+            "Type": None
+        },
+        hide_index=True, use_container_width=True, num_rows="fixed",
+        height=(len(data_items) * 35) + 38,
+        key=f"editor_{datum}_{st.session_state.reset_count}"
+    )
+
+    regels = edited_df[edited_df["Type"] != "Separator"].copy()
+    regels["Bedrag"] = regels["Bedrag"].fillna(0.0)
+    som_omzet = regels[regels["Type"] == "Omzet"]["Bedrag"].sum()
+    som_geld = regels[regels["Type"] == "Geld"]["Bedrag"].sum()
+    verschil = round(som_omzet - som_geld, 2)
+
+    st.divider()
+    c_inf, c_btn = st.columns([1, 1])
+
+    with c_inf:
+        if som_omzet == 0: st.info("👆 Vul in")
+        elif verschil == 0: st.markdown(f"### ✅ :green[€ {som_omzet:.2f}]")
+        else: st.markdown(f"### ❌ :red[€ {verschil:.2f}]")
+
+    with c_btn:
+        is_valid = (som_omzet > 0) and (verschil == 0) and overwrite_confirmed
+        label = "🔄 Opslaan" if is_overwrite_mode else "💾 Opslaan"
+        st.button(label, type="primary", disabled=not is_valid, use_container_width=True,
+                  on_click=handle_save_click,
+                  args=(datum, omschrijving, edited_df, som_omzet, som_geld, verschil))
+
+elif app_mode == "Export (Yuki)":
+    # (Export scherm code)
+    st.header("📤 Export voor Boekhouding")
+    col_start, col_end = st.columns(2)
+    start_date = col_start.date_input("Van", datetime(datetime.now().year, datetime.now().month, 1))
+    end_date = col_end.date_input("Tot", datetime.now())
+    if st.button("Genereer Export Bestand", type="primary"):
+        yuki_df = generate_yuki_export(start_date, end_date)
+        if yuki_df is not None:
+            st.success(f"✅ {len(yuki_df)} regels.")
+            st.dataframe(yuki_df, hide_index=True)
+            csv = yuki_df.to_csv(sep=';', index=False).encode('utf-8')
+            st.download_button("📥 Download (.csv)", csv, f"yuki_export.csv", "text/csv")
+        else:
+            st.warning("Geen data.")
+
+elif app_mode == "Instellingen":
+    # (Instellingen scherm code)
+    st.header("⚙️ Rekeningen")
+    current_settings = load_settings()
+    edited_settings = st.data_editor(current_settings, hide_index=True, use_container_width=True, num_rows="fixed")
+    if st.button("💾 Opslaan", type="primary"):
+        save_settings(edited_settings)
+        st.success("Opgeslagen!")
