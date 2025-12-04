@@ -28,7 +28,7 @@ st.markdown("""
         background-color: transparent !important;
     }
     
-    /* 2. Inhoud positie */
+    /* 2. Inhoud naar beneden duwen */
     .block-container { 
         padding-top: 3.5rem !important; 
         padding-bottom: 2rem; 
@@ -82,24 +82,17 @@ def get_default_settings():
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
         df = pd.read_csv(SETTINGS_FILE, dtype={"Rekening": str, "BtwCode": str})
-        
-        # MIGRATE: Voeg ExportDesc toe als die mist
-        if "ExportDesc" not in df.columns:
-            st.toast("Instellingen bijgewerkt: Kolom 'Omschrijving' toegevoegd", icon="🛠️")
-            df["ExportDesc"] = df["Label"] # Default
-            df.to_csv(SETTINGS_FILE, index=False)
-            
         if "Kas" in df["Code"].values:
             df.loc[df["Code"] == "Kas", "Code"] = "Cash"
             df.to_csv(SETTINGS_FILE, index=False)
-            
-        defaults = pd.DataFrame(get_default_settings())
-        for code in ["Oversch", "Afstorting"]:
-            if code not in df["Code"].values:
-                row = defaults[defaults["Code"] == code].iloc[0]
-                df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-                df.to_csv(SETTINGS_FILE, index=False)
-                
+        if "Oversch" not in df["Code"].values:
+            new_row = {"Code": "Oversch", "Label": "Overschrijving", "Rekening": "580000", "BtwCode": "", "Type": "Debet"}
+            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+            df.to_csv(SETTINGS_FILE, index=False)
+        if "Afstorting" not in df["Code"].values:
+            new_row = {"Code": "Afstorting", "Label": "Afstorting Bank", "Rekening": "550000", "BtwCode": "", "Type": "Credit"}
+            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+            df.to_csv(SETTINGS_FILE, index=False)
         return df
     else:
         df = pd.DataFrame(get_default_settings())
@@ -247,7 +240,10 @@ def generate_flexible_export(start_date, end_date):
             
             # VARIABELEN VERVANGEN
             final_desc = template.replace("&datum&", datum_fmt)
+            final_desc = final_desc.replace("&date&", datum_fmt)
+            final_desc = final_desc.replace("&label&", label)
             final_desc = final_desc.replace("&notitie&", desc_user)
+            
             if not final_desc: final_desc = f"{label} {datum_fmt}"
 
             transactions.append({
@@ -318,6 +314,9 @@ with st.sidebar:
     if is_admin:
         st.success("🔓 Admin")
         app_mode = st.radio("Ga naar:", ["Invoer", "Export (Yuki)", "Instellingen", "Export Configuratie", "Kassaldo Beheer"])
+        st.divider()
+        if os.path.exists(DATA_FILE):
+             with open(DATA_FILE, "rb") as f: st.download_button("📥 Backup", f, "backup.csv", "text/csv")
     st.divider()
     if app_mode == "Invoer":
         st.subheader("Profiel")
@@ -518,19 +517,27 @@ elif app_mode == "Export Configuratie":
 
 elif app_mode == "Instellingen":
     st.header("⚙️ Instellingen")
-    st.info("Beheer hier uw rekeningstelsel en omschrijvingen.")
+    
+    # HIER IS DE INFOBOX MET DE VARIABELEN
+    st.markdown("""
+    **ℹ️ Gebruik van variabelen in de omschrijving:**
+    * `&datum&` = Datum van ontvangst (bv. 04-12-2025)
+    * `&label&` = De naam van de categorie (bv. Bancontact)
+    * `&notitie&` = De notitie die je bij invoer gaf
+    """)
+    
     current_settings = load_settings()
     
     edited_settings = st.data_editor(
-        current_settings,
-        column_order=["Rekening", "BtwCode", "Label", "ExportDesc"],
+        current_settings, 
+        column_order=["Rekening", "BtwCode", "Label", "ExportDesc"], # Dwingt de volgorde af
         column_config={
             "Code": None, 
-            "Type": None,
-            "Rekening": st.column_config.TextColumn("Grootboekrekening", required=True),
-            "BtwCode": st.column_config.TextColumn("BTW Code"),
             "Label": st.column_config.TextColumn("Label", required=True),
-            "ExportDesc": st.column_config.TextColumn("Omschrijving")
+            "Rekening": st.column_config.TextColumn("Grootboekrekening", required=True),
+            "ExportDesc": st.column_config.TextColumn("Omschrijving"),
+            "BtwCode": st.column_config.TextColumn("BTW Code"),
+            "Type": None
         },
         hide_index=True, use_container_width=True, num_rows="fixed"
     )
