@@ -14,7 +14,7 @@ except: pass
 # --- CONFIGURATIE ---
 DATA_FILE = "kassa_historiek.csv"
 SETTINGS_FILE = "kassa_settings.csv"
-EXPORT_CONFIG_FILE = "export_config.csv" # NIEUW: Voor de flexibele kolommen
+EXPORT_CONFIG_FILE = "export_config.csv"
 CONFIG_FILE = "kassa_config.json"
 ADMIN_PASSWORD = "Yuki2025!" 
 
@@ -53,23 +53,41 @@ def save_config(config_data):
     with open(CONFIG_FILE, "w") as f: json.dump(config_data, f)
 
 def get_default_settings():
-    # Standaard rekeningstelsel
+    # AANGEPAST: 'Kas' is nu 'Cash' en 'Oversch' is toegevoegd
     return [
         {"Code": "Omzet_21",   "Label": "Omzet 21%",       "Rekening": "700021", "BtwCode": "V21", "Type": "Credit"},
         {"Code": "Omzet_12",   "Label": "Omzet 12%",       "Rekening": "700012", "BtwCode": "V12", "Type": "Credit"},
         {"Code": "Omzet_6",    "Label": "Omzet 6%",        "Rekening": "700006", "BtwCode": "V6",  "Type": "Credit"},
         {"Code": "Omzet_0",    "Label": "Omzet 0%",        "Rekening": "700000", "BtwCode": "V0",  "Type": "Credit"},
-        {"Code": "Kas",        "Label": "Kas (Cash)",      "Rekening": "570000", "BtwCode": "",    "Type": "Debet"},
+        
+        {"Code": "Cash",       "Label": "Kas (Cash)",      "Rekening": "570000", "BtwCode": "",    "Type": "Debet"}, # NAAMSWIJZIGING
         {"Code": "Bancontact", "Label": "Bancontact",      "Rekening": "580000", "BtwCode": "",    "Type": "Debet"},
         {"Code": "Payconiq",   "Label": "Payconiq",        "Rekening": "580000", "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Oversch",    "Label": "Overschrijving",  "Rekening": "580000", "BtwCode": "",    "Type": "Debet"},
+        {"Code": "Oversch",    "Label": "Overschrijving",  "Rekening": "580000", "BtwCode": "",    "Type": "Debet"}, # TOEGEVOEGD
         {"Code": "Bonnen",     "Label": "Cadeaubonnen",    "Rekening": "440000", "BtwCode": "",    "Type": "Debet"},
+        
         {"Code": "Afstorting", "Label": "Afstorting Bank", "Rekening": "550000", "BtwCode": "",    "Type": "Credit"},
     ]
 
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
-        return pd.read_csv(SETTINGS_FILE, dtype={"Rekening": str, "BtwCode": str})
+        df = pd.read_csv(SETTINGS_FILE, dtype={"Rekening": str, "BtwCode": str})
+        
+        # --- AUTO-MIGRATIE LOGICA ---
+        # 1. Check of 'Kas' nog bestaat, zo ja: hernoem naar 'Cash'
+        if "Kas" in df["Code"].values:
+            df.loc[df["Code"] == "Kas", "Code"] = "Cash"
+            st.toast("Instellingen bijgewerkt: 'Kas' is nu 'Cash'", icon="🛠️")
+            df.to_csv(SETTINGS_FILE, index=False)
+            
+        # 2. Check of 'Oversch' bestaat, zo nee: toevoegen
+        if "Oversch" not in df["Code"].values:
+            new_row = {"Code": "Oversch", "Label": "Overschrijving", "Rekening": "580000", "BtwCode": "", "Type": "Debet"}
+            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+            st.toast("Instellingen bijgewerkt: 'Overschrijving' toegevoegd", icon="🛠️")
+            df.to_csv(SETTINGS_FILE, index=False)
+            
+        return df
     else:
         df = pd.DataFrame(get_default_settings())
         df["Rekening"] = df["Rekening"].astype(str)
@@ -81,25 +99,22 @@ def get_yuki_mapping():
     df = load_settings()
     return dict(zip(df.Code, df.Rekening))
 
-# --- NIEUW: EXPORT CONFIGURATIE ---
+# --- EXPORT CONFIGURATIE ---
 
 def get_default_export_config():
-    # Dit is de standaard Yuki mapping die jij vroeg
-    # SourceType: 'Veld' (uit data) of 'Vast' (vaste tekst)
-    # SourceValue: De interne veldnaam of de vaste tekst
     return [
         {"Kolom": "Grootboekrekening kas", "Bron": "Vast", "Waarde": "570000"},
         {"Kolom": "Kas omschrijving",      "Bron": "Vast", "Waarde": "Dagontvangsten"},
         {"Kolom": "Transactie code",       "Bron": "Vast", "Waarde": ""},
-        {"Kolom": "Tegenrekening",         "Bron": "Veld", "Waarde": "Grootboekrekening"}, # Dynamisch
-        {"Kolom": "Naam tegenrekening",    "Bron": "Veld", "Waarde": "Omschrijving"},      # Dynamisch
-        {"Kolom": "Datum transactie",      "Bron": "Veld", "Waarde": "Datum"},             # Dynamisch
+        {"Kolom": "Tegenrekening",         "Bron": "Veld", "Waarde": "Grootboekrekening"}, 
+        {"Kolom": "Naam tegenrekening",    "Bron": "Veld", "Waarde": "Omschrijving"},      
+        {"Kolom": "Datum transactie",      "Bron": "Veld", "Waarde": "Datum"},             
         {"Kolom": "Omschrijving",          "Bron": "Veld", "Waarde": "Omschrijving"},
         {"Kolom": "Bedrag",                "Bron": "Veld", "Waarde": "Bedrag"},
-        {"Kolom": "Saldo kas",             "Bron": "Vast", "Waarde": ""}, # Yuki berekent dit vaak zelf of negeert het bij import
+        {"Kolom": "Saldo kas",             "Bron": "Vast", "Waarde": ""}, 
         {"Kolom": "Projectcode",           "Bron": "Vast", "Waarde": ""},
         {"Kolom": "Projectnaam",           "Bron": "Vast", "Waarde": ""},
-        {"Kolom": "BTW Code",              "Bron": "Veld", "Waarde": "BtwCode"}, # Extra handig
+        {"Kolom": "BTW Code",              "Bron": "Veld", "Waarde": "BtwCode"}, 
     ]
 
 def load_export_config():
@@ -118,7 +133,6 @@ def load_database():
     if os.path.exists(DATA_FILE):
         df = pd.read_csv(DATA_FILE)
         df = df.fillna("") 
-        # Migraties voor nieuwe kolommen
         for col in ["Geld_Overschrijving", "Geld_Afstorting"]:
             if col not in df.columns: df[col] = 0.0
         return df
@@ -181,87 +195,60 @@ def handle_save_click(datum, omschrijving, edited_df, som_omzet, som_geld, versc
     st.session_state.omschrijving = "" 
     st.session_state['show_success_toast'] = True
 
-# --- NIEUW: DYNAMISCHE EXPORT ENGINE ---
+# --- DYNAMISCHE EXPORT ENGINE ---
 
 def generate_flexible_export(start_date, end_date):
     df_data = load_database()
     export_config = load_export_config()
     CODES = get_yuki_mapping()
     
-    # Filter data
     mask = (df_data['Datum'] >= str(start_date)) & (df_data['Datum'] <= str(end_date))
     selection = df_data.loc[mask]
     if selection.empty: return None
 
     export_rows = []
     
-    # We lopen door elke dag en splitsen op in transactie-regels
     for index, row in selection.iterrows():
         if row['Totaal_Omzet'] == 0 and row['Totaal_Geld'] == 0: continue
         
-        datum_fmt = pd.to_datetime(row['Datum']).strftime('%d-%m-%Y') # Yuki formaat? Soms YYYY-MM-DD
+        datum_fmt = pd.to_datetime(row['Datum']).strftime('%d-%m-%Y')
         desc = row['Omschrijving']
         
-        # We maken een lijst van "Sub-transacties" voor deze dag
-        # Elk item is: (Grootboekrekening, Bedrag (+/-), BtwCode, RegelOmschrijving)
         transactions = []
         
-        # 1. OMZET (Credit = Negatief in veel boekhoudpakketten, of Positief in Credit kolom)
-        # Yuki CSV (Kasstaat) verwacht vaak: Bedrag In/Uit. Laten we teken volgen.
-        # Ontvangsten = Positief? Uitgaven = Negatief? Of Credit/Debet kolommen?
-        # De opgegeven structuur heeft 1 'Bedrag' kolom.
-        # Normaal in kasboek: Ontvangst (Omzet) = IN (+), Afstorting = UIT (-)
-        # Maar Yuki "Transacties" import vraagt vaak:
-        # Tegenrekening = Omzet (70xxxx). Bedrag = Het bedrag.
-        
-        # Laten we aannemen: Bedrag positief = Kas IN (dus Omzet boeken)
-        
+        # 1. OMZET
         if row['Omzet_21'] > 0: transactions.append({"Rek": CODES.get("Omzet_21"), "Bedrag": row['Omzet_21'], "Btw": "V21", "Note": "Omzet 21%"})
         if row['Omzet_12'] > 0: transactions.append({"Rek": CODES.get("Omzet_12"), "Bedrag": row['Omzet_12'], "Btw": "V12", "Note": "Omzet 12%"})
         if row['Omzet_6'] > 0:  transactions.append({"Rek": CODES.get("Omzet_6"),  "Bedrag": row['Omzet_6'],  "Btw": "V6",  "Note": "Omzet 6%"})
         if row['Omzet_0'] > 0:  transactions.append({"Rek": CODES.get("Omzet_0"),  "Bedrag": row['Omzet_0'],  "Btw": "V0",  "Note": "Omzet 0%"})
         
-        # 2. GELD (Hier is het tricky: In Yuki Kasstaat importeer je meestal de OMZET regels in het kasboek)
-        # Maar als je Bancontact apart wilt boeken (kruispost), dan is dat een UITGAVE uit de kas (virtueel) of een aparte boeking.
-        # De meeste "Kasboek Import" CSV's vragen enkel om de tegenrekeningen (Omzet). De betaling (Cash) is het saldo.
-        # Echter, als we 'Bancontact' op 580xxx willen, moeten we die als 'Uitgave' boeken uit de kas, 
-        # zodat het saldo in de kas enkel de 'Cash' overhoudt?
-        # OF we boeken alles als 'Diverse Post'.
-        
-        # Aanname: We boeken alles als regels in het Kasboek.
-        # Regel: Omzet (70xxx) -> Bedrag (+)
-        # Regel: Bancontact (58xxx) -> Bedrag (-) [Geld gaat uit kas naar bank]
-        
+        # 2. GELD (Nu met Cash en Overschrijving)
         if row['Geld_Bancontact'] > 0: transactions.append({"Rek": CODES.get("Bancontact"), "Bedrag": -row['Geld_Bancontact'], "Btw": "", "Note": "Betaling Bancontact"})
         if row['Geld_Payconiq'] > 0:   transactions.append({"Rek": CODES.get("Payconiq"),   "Bedrag": -row['Geld_Payconiq'],   "Btw": "", "Note": "Betaling Payconiq"})
         if row['Geld_Overschrijving'] > 0: transactions.append({"Rek": CODES.get("Oversch"), "Bedrag": -row['Geld_Overschrijving'], "Btw": "", "Note": "Betaling Overschrijving"})
         if row['Geld_Bonnen'] > 0:     transactions.append({"Rek": CODES.get("Bonnen"),     "Bedrag": -row['Geld_Bonnen'],     "Btw": "", "Note": "Betaling Bonnen"})
         if row['Geld_Afstorting'] > 0: transactions.append({"Rek": CODES.get("Afstorting"), "Bedrag": -row['Geld_Afstorting'], "Btw": "", "Note": "Afstorting Bank"})
+        
+        # LET OP: We gebruiken nu 'Cash' als code i.p.v. 'Kas'
+        if row['Geld_Cash'] > 0: transactions.append({"Rek": CODES.get("Cash"), "Bedrag": -row['Geld_Cash'], "Btw": "", "Note": "Betaling Cash"})
 
-        # NU BOUWEN WE DE CSV RIJEN OP BASIS VAN DE CONFIG
         for t in transactions:
             export_row = {}
             for _, cfg in export_config.iterrows():
                 col_name = cfg['Kolom']
                 source = cfg['Bron']
                 val_key = cfg['Waarde']
-                
                 final_val = ""
-                
                 if source == "Vast":
                     final_val = val_key if val_key and str(val_key) != "nan" else ""
                 elif source == "Veld":
-                    # Hier mappen we de interne data naar de kolom
                     if val_key == "Datum": final_val = datum_fmt
                     elif val_key == "Omschrijving": final_val = f"{desc} ({t['Note']})"
                     elif val_key == "Bedrag": final_val = f"{t['Bedrag']:.2f}".replace('.',',')
                     elif val_key == "Grootboekrekening": final_val = t['Rek']
                     elif val_key == "BtwCode": final_val = t['Btw']
-                
                 export_row[col_name] = final_val
-            
             export_rows.append(export_row)
-            
     return pd.DataFrame(export_rows)
 
 # --- STATE ---
@@ -315,8 +302,6 @@ with st.sidebar:
 # ==========================================
 
 if app_mode == "Invoer":
-    # (Zelfde code als voorheen, ingekort voor de leesbaarheid van dit antwoord)
-    # ... Invoer logica blijft 100% identiek ...
     if st.session_state['show_success_toast']:
         st.toast("Opgeslagen!", icon="✅")
         st.session_state['show_success_toast'] = False
@@ -444,14 +429,13 @@ elif app_mode == "Kassaldo Beheer":
         st.success("Opgeslagen!")
 
 elif app_mode == "Export (Yuki)":
-    # AANGEPASTE EXPORT MET CONFIG
+    # (Bestaande code met nieuwe functie)
     st.header("📤 Export Yuki")
-    st.info("De export wordt gegenereerd op basis van de 'Export Configuratie'.")
     col_start, col_end = st.columns(2)
     start_date = col_start.date_input("Van", datetime(datetime.now().year, datetime.now().month, 1))
     end_date = col_end.date_input("Tot", datetime.now())
     if st.button("Genereer", type="primary"):
-        yuki_df = generate_flexible_export(start_date, end_date) # Nieuwe functie
+        yuki_df = generate_flexible_export(start_date, end_date)
         if yuki_df is not None:
             st.success(f"{len(yuki_df)} regels.")
             st.dataframe(yuki_df, hide_index=True)
@@ -460,34 +444,16 @@ elif app_mode == "Export (Yuki)":
         else: st.warning("Geen data.")
 
 elif app_mode == "Export Configuratie":
-    # NIEUW TABBLAD
+    # (Bestaande code)
     st.header("📤 Export Configuratie")
-    st.info("Bepaal hier welke kolommen er in het CSV bestand komen.")
-    
     current_export_config = load_export_config()
-    
-    # De velden waaruit de gebruiker kan kiezen
-    internal_fields = ["Datum", "Omschrijving", "Bedrag", "Grootboekrekening", "BtwCode"]
     source_options = ["Vast", "Veld"]
-    
-    edited_export = st.data_editor(
-        current_export_config,
-        column_config={
-            "Kolom": st.column_config.TextColumn("CSV Kolomnaam", required=True),
-            "Bron": st.column_config.SelectboxColumn("Type Data", options=source_options, required=True),
-            "Waarde": st.column_config.TextColumn("Vaste Waarde of Veldnaam", help=f"Beschikbare velden: {', '.join(internal_fields)}")
-        },
-        num_rows="dynamic", # Gebruiker kan rijen toevoegen/wissen
-        use_container_width=True,
-        hide_index=True
-    )
-    
-    if st.button("💾 Configuratie Opslaan", type="primary"):
+    edited_export = st.data_editor(current_export_config, column_config={"Kolom": st.column_config.TextColumn("CSV Kolom", required=True), "Bron": st.column_config.SelectboxColumn("Type", options=source_options), "Waarde": st.column_config.TextColumn("Waarde")}, num_rows="dynamic", use_container_width=True, hide_index=True)
+    if st.button("💾 Opslaan", type="primary"):
         save_export_config(edited_export)
-        st.success("Configuratie opgeslagen!")
+        st.success("Opgeslagen!")
 
 elif app_mode == "Instellingen":
-    # (Bestaande code)
     st.header("⚙️ Rekeningen")
     current_settings = load_settings()
     edited_settings = st.data_editor(current_settings, hide_index=True, use_container_width=True, num_rows="fixed")
