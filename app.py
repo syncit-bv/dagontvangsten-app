@@ -20,22 +20,12 @@ ADMIN_PASSWORD = "Yuki2025!"
 
 st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="centered")
 
-# --- CSS STYLING (GECORRIGEERD: MENU KNOP ZICHTBAAR) ---
+# --- CSS STYLING ---
 st.markdown("""
     <style>
-    /* BELANGRIJK: We verbergen de header NIET (anders is menu weg), 
-       maar maken de achtergrond transparant. */
-    header[data-testid="stHeader"] {
-        background-color: transparent !important;
-    }
+    header {visibility: hidden;}
+    .block-container { padding-top: 1rem; padding-bottom: 2rem; }
     
-    /* Inhoud omhoog trekken */
-    .block-container { 
-        padding-top: 3rem !important; 
-        padding-bottom: 2rem; 
-    }
-    
-    /* Styling info kaarten */
     .info-card {
         height: 50px; display: flex; align-items: center; justify-content: center;
         border-radius: 8px; font-weight: bold; font-size: 0.95rem; margin-bottom: 10px;
@@ -83,7 +73,7 @@ def get_default_settings():
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
         df = pd.read_csv(SETTINGS_FILE, dtype={"Rekening": str, "BtwCode": str})
-        # Auto-migratie
+        # Auto-migraties
         if "Kas" in df["Code"].values:
             df.loc[df["Code"] == "Kas", "Code"] = "Cash"
             df.to_csv(SETTINGS_FILE, index=False)
@@ -116,7 +106,7 @@ def get_default_export_config():
         {"Kolom": "Kas omschrijving",      "Bron": "Vast", "Waarde": "Dagontvangsten"},
         {"Kolom": "Transactie code",       "Bron": "Vast", "Waarde": ""},
         {"Kolom": "Tegenrekening",         "Bron": "Veld", "Waarde": "Grootboekrekening"}, 
-        {"Kolom": "Naam tegenrekening",    "Bron": "Veld", "Waarde": "Label"}, 
+        {"Kolom": "Naam tegenrekening",    "Bron": "Veld", "Waarde": "Label"}, # CORRECTIE: Verwijst naar Label
         {"Kolom": "Datum transactie",      "Bron": "Veld", "Waarde": "Datum"},             
         {"Kolom": "Omschrijving",          "Bron": "Veld", "Waarde": "Omschrijving"},
         {"Kolom": "Bedrag",                "Bron": "Veld", "Waarde": "Bedrag"},
@@ -128,6 +118,7 @@ def get_default_export_config():
 def load_export_config():
     if os.path.exists(EXPORT_CONFIG_FILE):
         df = pd.read_csv(EXPORT_CONFIG_FILE)
+        # Check of BTW Code er nog in zit (van oude versie), zo ja, verwijder hem
         if "BTW Code" in df["Kolom"].values:
             df = df[df["Kolom"] != "BTW Code"]
             df.to_csv(EXPORT_CONFIG_FILE, index=False)
@@ -206,7 +197,7 @@ def handle_save_click(datum, omschrijving, edited_df, som_omzet, som_geld, versc
     st.session_state.omschrijving = "" 
     st.session_state['show_success_toast'] = True
 
-# --- EXPORT ENGINE (AANGEPAST: SORTERING & LABELS) ---
+# --- EXPORT ENGINE (AANGEPAST: LABEL LOOKUP) ---
 
 def generate_flexible_export(start_date, end_date):
     df_data = load_database()
@@ -215,7 +206,8 @@ def generate_flexible_export(start_date, end_date):
     
     mask = (df_data['Datum'] >= str(start_date)) & (df_data['Datum'] <= str(end_date))
     selection = df_data.loc[mask]
-    selection = selection.sort_values(by="Datum", ascending=True) # Sortering Oplopend
+    
+    selection = selection.sort_values(by="Datum", ascending=True)
     
     if selection.empty: return None
 
@@ -229,22 +221,32 @@ def generate_flexible_export(start_date, end_date):
         
         transactions = []
         
-        def add_trx(code_key, bedrag, btw, trx_type="Omzet", label_override=None):
+        # Helper: trx_type bepaalt omschrijving gedrag, maar LABEL wordt altijd opgezocht
+        def add_trx(code_key, bedrag, btw, trx_type="Omzet"):
             rekening = CODES.get(code_key, "")
+            
+            # HIER IS DE FIX: We halen ALTIJD het label uit de settings (LABELS dict)
+            settings_label = LABELS.get(code_key, code_key)
+            
             if trx_type == "Payment":
-                note = LABELS.get(code_key, label_override)
+                note = settings_label # Puur "Bancontact"
             else:
-                note = label_override 
+                note = settings_label # Puur "Omzet 21%" (voor in de haakjes)
 
             transactions.append({
-                "Rek": rekening, "Bedrag": bedrag, "Btw": btw, "Note": note, "Type": trx_type, "Label": note
+                "Rek": rekening, 
+                "Bedrag": bedrag, 
+                "Btw": btw, 
+                "Note": note, 
+                "Type": trx_type, 
+                "Label": settings_label # Deze wordt gebruikt voor 'Naam Tegenrekening'
             })
 
         # OMZET
-        if row['Omzet_21'] > 0: add_trx("Omzet_21", row['Omzet_21'], "V21", "Omzet", "Omzet 21%")
-        if row['Omzet_12'] > 0: add_trx("Omzet_12", row['Omzet_12'], "V12", "Omzet", "Omzet 12%")
-        if row['Omzet_6'] > 0:  add_trx("Omzet_6",  row['Omzet_6'],  "V6",  "Omzet", "Omzet 6%")
-        if row['Omzet_0'] > 0:  add_trx("Omzet_0",  row['Omzet_0'],  "V0",  "Omzet", "Omzet 0%")
+        if row['Omzet_21'] > 0: add_trx("Omzet_21", row['Omzet_21'], "V21", "Omzet")
+        if row['Omzet_12'] > 0: add_trx("Omzet_12", row['Omzet_12'], "V12", "Omzet")
+        if row['Omzet_6'] > 0:  add_trx("Omzet_6",  row['Omzet_6'],  "V6",  "Omzet")
+        if row['Omzet_0'] > 0:  add_trx("Omzet_0",  row['Omzet_0'],  "V0",  "Omzet")
         
         # GELD
         if row['Geld_Bancontact'] > 0:   add_trx("Bancontact", -row['Geld_Bancontact'], "", "Payment")
@@ -269,7 +271,10 @@ def generate_flexible_export(start_date, end_date):
                     elif val_key == "Omschrijving": 
                         if t['Type'] == 'Payment': final_val = t['Note'] 
                         else: final_val = f"{desc_base} ({t['Note']})"
+                    
+                    # DIT IS DE KOPPELING: Naam Tegenrekening -> Label uit Settings
                     elif val_key == "Label": final_val = t['Label']
+                        
                     elif val_key == "Bedrag": final_val = f"{-t['Bedrag']:.2f}".replace('.',',')
                     elif val_key == "Grootboekrekening": final_val = t['Rek']
                     elif val_key == "BtwCode": final_val = t['Btw']
@@ -497,6 +502,7 @@ elif app_mode == "Export Configuratie":
     st.header("📤 Export Configuratie")
     current_export_config = load_export_config()
     source_options = ["Vast", "Veld"]
+    internal_fields = ["Datum", "Omschrijving", "Bedrag", "Grootboekrekening", "BtwCode", "Label"]
     edited_export = st.data_editor(current_export_config, column_config={"Kolom": st.column_config.TextColumn("CSV Kolom", required=True), "Bron": st.column_config.SelectboxColumn("Type", options=source_options), "Waarde": st.column_config.TextColumn("Waarde")}, num_rows="dynamic", use_container_width=True, hide_index=True)
     if st.button("💾 Opslaan", type="primary"):
         save_export_config(edited_export)
