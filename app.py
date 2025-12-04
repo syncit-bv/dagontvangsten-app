@@ -20,21 +20,12 @@ ADMIN_PASSWORD = "Yuki2025!"
 
 st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="centered")
 
-# --- CSS STYLING (CORRECTIE: MENU TERUG ZICHTBAAR) ---
+# --- CSS STYLING ---
 st.markdown("""
     <style>
-    /* 1. Header Transparant maken (Menu blijft zichtbaar, witte balk weg) */
-    header[data-testid="stHeader"] {
-        background-color: transparent !important;
-    }
+    header {visibility: hidden;}
+    .block-container { padding-top: 1rem; padding-bottom: 2rem; }
     
-    /* 2. Inhoud positie */
-    .block-container { 
-        padding-top: 3rem; /* Iets meer ruimte voor de menuknop */
-        padding-bottom: 2rem; 
-    }
-    
-    /* 3. Info Kaarten */
     .info-card {
         height: 50px; display: flex; align-items: center; justify-content: center;
         border-radius: 8px; font-weight: bold; font-size: 0.95rem; margin-bottom: 10px;
@@ -109,12 +100,13 @@ def get_yuki_mapping():
 
 # --- EXPORT CONFIG ---
 def get_default_export_config():
+    # AANGEPAST: "Naam tegenrekening" wijst nu standaard naar "Label"
     return [
         {"Kolom": "Grootboekrekening kas", "Bron": "Vast", "Waarde": "570000"},
         {"Kolom": "Kas omschrijving",      "Bron": "Vast", "Waarde": "Dagontvangsten"},
         {"Kolom": "Transactie code",       "Bron": "Vast", "Waarde": ""},
         {"Kolom": "Tegenrekening",         "Bron": "Veld", "Waarde": "Grootboekrekening"}, 
-        {"Kolom": "Naam tegenrekening",    "Bron": "Veld", "Waarde": "Omschrijving"},      
+        {"Kolom": "Naam tegenrekening",    "Bron": "Veld", "Waarde": "Label"},  # HIER IS DE WIJZIGING (Was Omschrijving)    
         {"Kolom": "Datum transactie",      "Bron": "Veld", "Waarde": "Datum"},             
         {"Kolom": "Omschrijving",          "Bron": "Veld", "Waarde": "Omschrijving"},
         {"Kolom": "Bedrag",                "Bron": "Veld", "Waarde": "Bedrag"},
@@ -204,7 +196,7 @@ def handle_save_click(datum, omschrijving, edited_df, som_omzet, som_geld, versc
     st.session_state.omschrijving = "" 
     st.session_state['show_success_toast'] = True
 
-# --- EXPORT ENGINE ---
+# --- DYNAMISCHE EXPORT ENGINE ---
 
 def generate_flexible_export(start_date, end_date):
     df_data = load_database()
@@ -228,24 +220,28 @@ def generate_flexible_export(start_date, end_date):
         
         transactions = []
         
-        def add_trx(code_key, bedrag, btw, trx_type="Omzet", label_override=None):
+        # AANGEPAST: Geen hardcoded tekst meer, maar LABELS ophalen
+        def add_trx(code_key, bedrag, btw, trx_type="Omzet"):
             rekening = CODES.get(code_key, "")
+            label_naam = LABELS.get(code_key, code_key) # Haal naam uit settings
+            
+            # Bepaal Omschrijving
             if trx_type == "Payment":
-                note = LABELS.get(code_key, label_override)
+                note = label_naam # Bijv: "Bancontact"
             else:
-                note = label_override 
+                note = label_naam # Bijv: "Omzet 21%"
 
             transactions.append({
-                "Rek": rekening, "Bedrag": bedrag, "Btw": btw, "Note": note, "Type": trx_type
+                "Rek": rekening, "Bedrag": bedrag, "Btw": btw, "Note": note, "Type": trx_type, "Label": label_naam
             })
 
-        # OMZET
-        if row['Omzet_21'] > 0: add_trx("Omzet_21", row['Omzet_21'], "V21", "Omzet", "Omzet 21%")
-        if row['Omzet_12'] > 0: add_trx("Omzet_12", row['Omzet_12'], "V12", "Omzet", "Omzet 12%")
-        if row['Omzet_6'] > 0:  add_trx("Omzet_6",  row['Omzet_6'],  "V6",  "Omzet", "Omzet 6%")
-        if row['Omzet_0'] > 0:  add_trx("Omzet_0",  row['Omzet_0'],  "V0",  "Omzet", "Omzet 0%")
+        # 1. OMZET
+        if row['Omzet_21'] > 0: add_trx("Omzet_21", row['Omzet_21'], "V21", "Omzet")
+        if row['Omzet_12'] > 0: add_trx("Omzet_12", row['Omzet_12'], "V12", "Omzet")
+        if row['Omzet_6'] > 0:  add_trx("Omzet_6",  row['Omzet_6'],  "V6",  "Omzet")
+        if row['Omzet_0'] > 0:  add_trx("Omzet_0",  row['Omzet_0'],  "V0",  "Omzet")
         
-        # GELD
+        # 2. GELD
         if row['Geld_Bancontact'] > 0:   add_trx("Bancontact", -row['Geld_Bancontact'], "", "Payment")
         if row['Geld_Payconiq'] > 0:     add_trx("Payconiq",   -row['Geld_Payconiq'],   "", "Payment")
         if row['Geld_Overschrijving'] > 0: add_trx("Oversch",  -row['Geld_Overschrijving'], "", "Payment")
@@ -268,6 +264,10 @@ def generate_flexible_export(start_date, end_date):
                     elif val_key == "Omschrijving": 
                         if t['Type'] == 'Payment': final_val = t['Note'] 
                         else: final_val = f"{desc_base} ({t['Note']})"
+                    
+                    # NIEUW VELD: Label (Voor Naam Tegenrekening)
+                    elif val_key == "Label": final_val = t['Label']
+                        
                     elif val_key == "Bedrag": final_val = f"{-t['Bedrag']:.2f}".replace('.',',')
                     elif val_key == "Grootboekrekening": final_val = t['Rek']
                     elif val_key == "BtwCode": final_val = t['Btw']
@@ -334,7 +334,7 @@ if app_mode == "Invoer":
     
     datum_geselecteerd = st.session_state.date_picker_val
     
-    # Header
+    # Header & Status
     check_data = get_data_by_date(datum_geselecteerd)
     openings_saldo = calculate_current_saldo(datum_geselecteerd)
     
@@ -495,6 +495,7 @@ elif app_mode == "Export Configuratie":
     st.header("📤 Export Configuratie")
     current_export_config = load_export_config()
     source_options = ["Vast", "Veld"]
+    internal_fields = ["Datum", "Omschrijving", "Bedrag", "Grootboekrekening", "BtwCode", "Label"] # Label toegevoegd
     edited_export = st.data_editor(current_export_config, column_config={"Kolom": st.column_config.TextColumn("CSV Kolom", required=True), "Bron": st.column_config.SelectboxColumn("Type", options=source_options), "Waarde": st.column_config.TextColumn("Waarde")}, num_rows="dynamic", use_container_width=True, hide_index=True)
     if st.button("💾 Opslaan", type="primary"):
         save_export_config(edited_export)
