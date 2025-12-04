@@ -20,24 +20,57 @@ ADMIN_PASSWORD = "Yuki2025!"
 
 st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="centered")
 
-# CSS Styling
+# --- CSS STYLING (AANGEPAST: WITTE BALK WEG) ---
 st.markdown("""
     <style>
-    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
+    /* 1. VERWIJDER DE STANDAARD STREAMLIT HEADER & WITRUIMTE */
+    header {visibility: hidden;} /* Verbergt de bovenste balk */
     
+    .block-container {
+        padding-top: 1rem !important; /* Trekt de inhoud naar boven */
+        padding-bottom: 2rem;
+    }
+
+    /* 2. STYLING VOOR INFO KAARTEN */
     .info-card {
-        height: 50px; display: flex; align-items: center; justify-content: center;
-        border-radius: 8px; font-weight: bold; font-size: 0.95rem; margin-bottom: 10px;
+        height: 50px; 
+        display: flex; 
+        align-items: center; 
+        justify-content: center;
+        border-radius: 8px; 
+        font-weight: bold; 
+        font-size: 0.95rem; 
+        margin-bottom: 10px;
         border: 1px solid rgba(49, 51, 63, 0.1);
     }
+    
     .card-red   { background-color: #fce8e6; color: #a30f0f; }
     .card-green { background-color: #e6fcf5; color: #0f5132; }
     .card-grey  { background-color: #f0f2f6; color: #31333f; }
     .card-blue  { background-color: #e7f5ff; color: #004085; }
-    .day-header { text-align: center; font-size: 1.3rem; font-weight: 700; margin-bottom: 0px; color: #31333f; }
-    .sub-status { text-align: center; font-size: 0.85rem; margin-bottom: 5px; }
+    
+    .day-header { 
+        text-align: center; 
+        font-size: 1.3rem; 
+        font-weight: 700; 
+        margin-bottom: 0px; 
+        color: #31333f; 
+    }
+    
+    .sub-status { 
+        text-align: center; 
+        font-size: 0.85rem; 
+        margin-bottom: 5px; 
+    }
+    
     div.stButton > button { width: 100%; }
     div[data-testid="stDateInput"] { text-align: center; }
+    
+    /* Zorg dat de expander (Maandoverzicht) netjes aansluit */
+    .streamlit-expanderHeader {
+        background-color: #f8f9fa;
+        border-radius: 5px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -53,19 +86,17 @@ def save_config(config_data):
     with open(CONFIG_FILE, "w") as f: json.dump(config_data, f)
 
 def get_default_settings():
-    # AANGEPAST: 'Kas' is nu 'Cash' en 'Oversch' is toegevoegd
     return [
         {"Code": "Omzet_21",   "Label": "Omzet 21%",       "Rekening": "700021", "BtwCode": "V21", "Type": "Credit"},
         {"Code": "Omzet_12",   "Label": "Omzet 12%",       "Rekening": "700012", "BtwCode": "V12", "Type": "Credit"},
         {"Code": "Omzet_6",    "Label": "Omzet 6%",        "Rekening": "700006", "BtwCode": "V6",  "Type": "Credit"},
         {"Code": "Omzet_0",    "Label": "Omzet 0%",        "Rekening": "700000", "BtwCode": "V0",  "Type": "Credit"},
         
-        {"Code": "Cash",       "Label": "Kas (Cash)",      "Rekening": "570000", "BtwCode": "",    "Type": "Debet"}, # NAAMSWIJZIGING
+        {"Code": "Cash",       "Label": "Kas (Cash)",      "Rekening": "570000", "BtwCode": "",    "Type": "Debet"},
         {"Code": "Bancontact", "Label": "Bancontact",      "Rekening": "580000", "BtwCode": "",    "Type": "Debet"},
         {"Code": "Payconiq",   "Label": "Payconiq",        "Rekening": "580000", "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Oversch",    "Label": "Overschrijving",  "Rekening": "580000", "BtwCode": "",    "Type": "Debet"}, # TOEGEVOEGD
+        {"Code": "Oversch",    "Label": "Overschrijving",  "Rekening": "580000", "BtwCode": "",    "Type": "Debet"},
         {"Code": "Bonnen",     "Label": "Cadeaubonnen",    "Rekening": "440000", "BtwCode": "",    "Type": "Debet"},
-        
         {"Code": "Afstorting", "Label": "Afstorting Bank", "Rekening": "550000", "BtwCode": "",    "Type": "Credit"},
     ]
 
@@ -73,18 +104,13 @@ def load_settings():
     if os.path.exists(SETTINGS_FILE):
         df = pd.read_csv(SETTINGS_FILE, dtype={"Rekening": str, "BtwCode": str})
         
-        # --- AUTO-MIGRATIE LOGICA ---
-        # 1. Check of 'Kas' nog bestaat, zo ja: hernoem naar 'Cash'
+        # AUTO-MIGRATIE
         if "Kas" in df["Code"].values:
             df.loc[df["Code"] == "Kas", "Code"] = "Cash"
-            st.toast("Instellingen bijgewerkt: 'Kas' is nu 'Cash'", icon="🛠️")
             df.to_csv(SETTINGS_FILE, index=False)
-            
-        # 2. Check of 'Oversch' bestaat, zo nee: toevoegen
         if "Oversch" not in df["Code"].values:
             new_row = {"Code": "Oversch", "Label": "Overschrijving", "Rekening": "580000", "BtwCode": "", "Type": "Debet"}
             df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-            st.toast("Instellingen bijgewerkt: 'Overschrijving' toegevoegd", icon="🛠️")
             df.to_csv(SETTINGS_FILE, index=False)
             
         return df
@@ -222,14 +248,13 @@ def generate_flexible_export(start_date, end_date):
         if row['Omzet_6'] > 0:  transactions.append({"Rek": CODES.get("Omzet_6"),  "Bedrag": row['Omzet_6'],  "Btw": "V6",  "Note": "Omzet 6%"})
         if row['Omzet_0'] > 0:  transactions.append({"Rek": CODES.get("Omzet_0"),  "Bedrag": row['Omzet_0'],  "Btw": "V0",  "Note": "Omzet 0%"})
         
-        # 2. GELD (Nu met Cash en Overschrijving)
+        # 2. GELD
         if row['Geld_Bancontact'] > 0: transactions.append({"Rek": CODES.get("Bancontact"), "Bedrag": -row['Geld_Bancontact'], "Btw": "", "Note": "Betaling Bancontact"})
         if row['Geld_Payconiq'] > 0:   transactions.append({"Rek": CODES.get("Payconiq"),   "Bedrag": -row['Geld_Payconiq'],   "Btw": "", "Note": "Betaling Payconiq"})
         if row['Geld_Overschrijving'] > 0: transactions.append({"Rek": CODES.get("Oversch"), "Bedrag": -row['Geld_Overschrijving'], "Btw": "", "Note": "Betaling Overschrijving"})
         if row['Geld_Bonnen'] > 0:     transactions.append({"Rek": CODES.get("Bonnen"),     "Bedrag": -row['Geld_Bonnen'],     "Btw": "", "Note": "Betaling Bonnen"})
         if row['Geld_Afstorting'] > 0: transactions.append({"Rek": CODES.get("Afstorting"), "Bedrag": -row['Geld_Afstorting'], "Btw": "", "Note": "Afstorting Bank"})
         
-        # LET OP: We gebruiken nu 'Cash' als code i.p.v. 'Kas'
         if row['Geld_Cash'] > 0: transactions.append({"Rek": CODES.get("Cash"), "Bedrag": -row['Geld_Cash'], "Btw": "", "Note": "Betaling Cash"})
 
         for t in transactions:
@@ -273,7 +298,7 @@ with st.sidebar:
     
     if is_admin:
         st.success("🔓 Admin")
-        app_mode = st.radio("Ga naar:", ["Invoer", "Export (Yuki)", "Instellingen", "Export Configuratie"])
+        app_mode = st.radio("Ga naar:", ["Invoer", "Export (Yuki)", "Instellingen", "Export Configuratie", "Kassaldo Beheer"])
         st.divider()
         if os.path.exists(DATA_FILE):
              with open(DATA_FILE, "rb") as f: st.download_button("📥 Backup", f, "backup.csv", "text/csv")
@@ -416,6 +441,30 @@ if app_mode == "Invoer":
                   on_click=handle_save_click,
                   args=(datum_geselecteerd, omschrijving, edited_df, som_omzet, som_geld, verschil))
 
+    # --- MAAND OVERZICHT (ONDERAAN) ---
+    with st.expander("📅 Bekijk status maandoverzicht", expanded=False):
+        huidige_maand = datum_geselecteerd.month
+        huidig_jaar = datum_geselecteerd.year
+        df_hist = load_database()
+        num_days = calendar.monthrange(huidig_jaar, huidige_maand)[1]
+        days = [date(huidig_jaar, huidige_maand, day) for day in range(1, num_days + 1)]
+        status_list = []
+        for d in days:
+            d_str = str(d)
+            row = df_hist[df_hist['Datum'] == d_str]
+            omzet = 0.0
+            status_txt = "⚪"
+            if not row.empty:
+                omzet_val = float(row.iloc[0]['Totaal_Omzet'])
+                geld_val = float(row.iloc[0]['Totaal_Geld'])
+                if omzet_val == 0 and geld_val == 0: status_txt = "💤"
+                else: 
+                    status_txt = "✅"
+                    omzet = omzet_val
+            elif d < date.today(): status_txt = "❌"
+            status_list.append({"Datum": d.strftime("%d-%m"), "Dag": d.strftime("%a"), "Status": status_txt, "Omzet": f"€ {omzet:.2f}" if omzet > 0 else "-"})
+        st.dataframe(pd.DataFrame(status_list), hide_index=True, use_container_width=True)
+
 elif app_mode == "Kassaldo Beheer":
     # (Bestaande code)
     st.header("💰 Kassaldo Beheer")
@@ -429,7 +478,7 @@ elif app_mode == "Kassaldo Beheer":
         st.success("Opgeslagen!")
 
 elif app_mode == "Export (Yuki)":
-    # (Bestaande code met nieuwe functie)
+    # (Bestaande code)
     st.header("📤 Export Yuki")
     col_start, col_end = st.columns(2)
     start_date = col_start.date_input("Van", datetime(datetime.now().year, datetime.now().month, 1))
@@ -448,12 +497,14 @@ elif app_mode == "Export Configuratie":
     st.header("📤 Export Configuratie")
     current_export_config = load_export_config()
     source_options = ["Vast", "Veld"]
+    internal_fields = ["Datum", "Omschrijving", "Bedrag", "Grootboekrekening", "BtwCode"]
     edited_export = st.data_editor(current_export_config, column_config={"Kolom": st.column_config.TextColumn("CSV Kolom", required=True), "Bron": st.column_config.SelectboxColumn("Type", options=source_options), "Waarde": st.column_config.TextColumn("Waarde")}, num_rows="dynamic", use_container_width=True, hide_index=True)
     if st.button("💾 Opslaan", type="primary"):
         save_export_config(edited_export)
         st.success("Opgeslagen!")
 
 elif app_mode == "Instellingen":
+    # (Bestaande code)
     st.header("⚙️ Rekeningen")
     current_settings = load_settings()
     edited_settings = st.data_editor(current_settings, hide_index=True, use_container_width=True, num_rows="fixed")
