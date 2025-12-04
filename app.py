@@ -203,24 +203,21 @@ def generate_yuki_export(start_date, end_date):
 
     return pd.DataFrame(yuki_rows, columns=["Datum", "Grootboekrekening", "Omschrijving", "Bedrag", "BtwCode"])
 
-# --- STATE MANAGEMENT ---
+# --- STATE MANAGEMENT (FIXED: Single Source of Truth) ---
 if 'reset_count' not in st.session_state: st.session_state.reset_count = 0
 if 'show_success_toast' not in st.session_state: st.session_state['show_success_toast'] = False
-if 'current_date' not in st.session_state: st.session_state.current_date = datetime.now().date()
 
-# HIER ZAT HET PROBLEEM (FIXED):
-# We moeten ook 'date_picker_val' bijwerken, anders luistert de widget niet
+# We gebruiken enkel date_picker_val als de waarheid.
+if 'date_picker_val' not in st.session_state:
+    st.session_state.date_picker_val = datetime.now().date()
+
+# Navigatie functies manipuleren DIRECT de state van de widget
 def prev_day(): 
-    st.session_state.current_date -= timedelta(days=1)
-    st.session_state.date_picker_val = st.session_state.current_date
+    st.session_state.date_picker_val -= timedelta(days=1)
 
 def next_day(): 
-    if st.session_state.current_date < datetime.now().date():
-        st.session_state.current_date += timedelta(days=1)
-        st.session_state.date_picker_val = st.session_state.current_date
-
-def update_date(): 
-    st.session_state.current_date = st.session_state.date_picker_val
+    if st.session_state.date_picker_val < datetime.now().date():
+        st.session_state.date_picker_val += timedelta(days=1)
 
 # ==========================================
 # ⚙️ SIDEBAR
@@ -271,10 +268,13 @@ if app_mode == "Invoer":
         st.toast("Succesvol opgeslagen!", icon="✅")
         st.session_state['show_success_toast'] = False
 
+    # Huidige datum uit state halen
+    datum_geselecteerd = st.session_state.date_picker_val
+
     # MAAND OVERZICHT
     with st.expander("📅 Status Maandoverzicht", expanded=False):
-        huidige_maand = st.session_state.current_date.month
-        huidig_jaar = st.session_state.current_date.year
+        huidige_maand = datum_geselecteerd.month
+        huidig_jaar = datum_geselecteerd.year
         df_hist = load_database()
         num_days = calendar.monthrange(huidig_jaar, huidige_maand)[1]
         days = [date(huidig_jaar, huidige_maand, day) for day in range(1, num_days + 1)]
@@ -299,7 +299,6 @@ if app_mode == "Invoer":
         st.dataframe(pd.DataFrame(status_list), hide_index=True, use_container_width=True)
 
     # --- DATUM & STATUS ---
-    datum_geselecteerd = st.session_state.current_date
     check_data = get_data_by_date(datum_geselecteerd)
     
     if check_data is not None:
@@ -317,7 +316,15 @@ if app_mode == "Invoer":
     col_prev, col_pick, col_next = st.columns([1, 2, 1])
     with col_prev: st.button("⬅️ Vorige", on_click=prev_day, use_container_width=True)
     with col_pick:
-        st.date_input("Datum", value=datum_geselecteerd, max_value=datetime.now().date(), label_visibility="collapsed", key="date_picker_val", on_change=update_date)
+        # HIER ZAT DE FOUT: value=... moet EXACT de key zijn.
+        # We gebruiken de key 'date_picker_val' om de state te delen.
+        st.date_input(
+            "Datum", 
+            value=st.session_state.date_picker_val, # Expliciet koppelen aan state
+            max_value=datetime.now().date(), 
+            label_visibility="collapsed", 
+            key="date_picker_val" # Dezelfde key als in state
+        )
         st.markdown(f"<div style='text-align: center; font-weight: bold; font-size: 1.1em;'>{dag_naam}</div>", unsafe_allow_html=True)
         st.markdown(f"<div style='text-align: center; color: {status_color}; font-size: 0.9em; margin-bottom: 10px;'>{status_icon} {status_text}</div>", unsafe_allow_html=True)
     with col_next:
@@ -347,7 +354,7 @@ if app_mode == "Invoer":
                 is_gesloten = True
 
         if is_gesloten:
-            st.info("Status: Gesloten (0.00)")
+            st.info("Status: Gesloten")
             som_omzet, som_geld, verschil, cash_in_today, cash_out_today = 0.0, 0.0, 0.0, 0.0, 0.0
             edited_df = None 
             if not omschrijving: omschrijving = "SLUITINGSDAG"
