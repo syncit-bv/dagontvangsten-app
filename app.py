@@ -27,19 +27,18 @@ st.markdown("""
     .stAlert { margin-top: 1rem; }
     div.stButton > button { width: 100%; }
     
-    /* Styling voor status boxjes */
-    .status-box {
-        padding: 8px;
-        border-radius: 5px;
+    /* Styling voor de Saldo Kaart */
+    .saldo-box {
+        padding: 10px;
+        background-color: #f8f9fa;
+        border-radius: 8px;
+        border: 1px solid #e9ecef;
         text-align: center;
-        font-weight: bold;
-        font-size: 0.9em;
-        margin-bottom: 10px;
     }
-    .status-green { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-    .status-red { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-    .status-grey { background-color: #e2e3e5; color: #383d41; border: 1px solid #d6d8db; }
-    .status-blue { background-color: #cce5ff; color: #004085; border: 1px solid #b8daff; }
+    .check-green { color: #155724; background-color: #d4edda; border-color: #c3e6cb; padding: 10px; border-radius: 5px; text-align: center; font-weight: bold;}
+    .check-red { color: #721c24; background-color: #f8d7da; border-color: #f5c6cb; padding: 10px; border-radius: 5px; text-align: center; font-weight: bold;}
+    .check-grey { color: #383d41; background-color: #e2e3e5; border-color: #d6d8db; padding: 10px; border-radius: 5px; text-align: center;}
+    .check-blue { color: #004085; background-color: #cce5ff; border-color: #b8daff; padding: 10px; border-radius: 5px; text-align: center; font-weight: bold;}
     </style>
     """, unsafe_allow_html=True)
 
@@ -214,7 +213,6 @@ if 'reset_count' not in st.session_state: st.session_state.reset_count = 0
 if 'show_success_toast' not in st.session_state: st.session_state['show_success_toast'] = False
 if 'date_picker_val' not in st.session_state: st.session_state.date_picker_val = datetime.now().date()
 
-# Navigatie functies
 def prev_day(): 
     st.session_state.date_picker_val -= timedelta(days=1)
 
@@ -223,8 +221,7 @@ def next_day():
         st.session_state.date_picker_val += timedelta(days=1)
 
 def update_date(): 
-    # Deze functie is gekoppeld aan de on_change van de datepicker
-    pass # De value wordt automatisch geupdate in session_state
+    pass 
 
 # ==========================================
 # ⚙️ SIDEBAR
@@ -275,60 +272,10 @@ if app_mode == "Invoer":
         st.toast("Succesvol opgeslagen!", icon="✅")
         st.session_state['show_success_toast'] = False
 
-    # Huidige datum uit state
     datum_geselecteerd = st.session_state.date_picker_val
 
-    # --- DATUM & HEADER SECTIE ---
-    
-    # 1. Bepaal status van DEZE dag
-    check_data = get_data_by_date(datum_geselecteerd)
-    
-    if check_data is not None:
-        if float(check_data['Totaal_Omzet']) == 0 and float(check_data['Totaal_Geld']) == 0:
-            status_html = "<div class='status-box status-blue'>💤 SLUITINGSDAG</div>"
-        else:
-            status_html = "<div class='status-box status-green'>✅ REEDS INGEVULD</div>"
-    elif datum_geselecteerd > datetime.now().date():
-        status_html = "<div class='status-box status-grey'>🔒 TOEKOMST</div>"
-    else:
-        status_html = "<div class='status-box status-red'>❌ NOG IN TE VULLEN</div>"
-
-    dag_naam = datum_geselecteerd.strftime("%A").upper()
-    datum_mooi = datum_geselecteerd.strftime("%d %B %Y")
-
-    # 2. De Layout: 3 kolommen
-    col_left, col_center, col_right = st.columns([1.5, 2, 1.5])
-    
-    with col_left:
-        # HIER STAAT NU DE STATUS LINKS
-        st.markdown(status_html, unsafe_allow_html=True)
-        st.button("⬅️ Vorige dag", on_click=prev_day, use_container_width=True)
-        
-    with col_center:
-        # HIER STAAT DE DAGNAAM & DATUMPICKER (Ingeklapt)
-        st.markdown(f"<h2 style='text-align: center; margin:0; padding:0;'>{dag_naam}</h2>", unsafe_allow_html=True)
-        
-        # De datepicker staat hieronder, gecentreerd (visueel)
-        st.date_input(
-            "Selecteer datum", 
-            value=st.session_state.date_picker_val, 
-            max_value=datetime.now().date(), 
-            label_visibility="collapsed", 
-            key="date_picker_val", # Koppeling met state
-            on_change=update_date
-        )
-
-    with col_right:
-        # RECHTS DE VOLGENDE KNOP
-        is_today = (datum_geselecteerd >= datetime.now().date())
-        # Placeholder om button op zelfde hoogte te krijgen als vorige
-        st.markdown("<div style='height: 42px;'></div>", unsafe_allow_html=True) 
-        st.button("Volgende dag ➡️", on_click=next_day, disabled=is_today, use_container_width=True)
-
-    st.divider()
-
-    # --- MAAND OVERZICHT (Uitklapbaar) ---
-    with st.expander("🔍 Bekijk maandoverzicht"):
+    # --- MAAND OVERZICHT ---
+    with st.expander("📅 Status Maandoverzicht", expanded=False):
         huidige_maand = datum_geselecteerd.month
         huidig_jaar = datum_geselecteerd.year
         df_hist = load_database()
@@ -354,53 +301,122 @@ if app_mode == "Invoer":
             status_list.append({"Datum": d.strftime("%d-%m"), "Dag": d.strftime("%a"), "Status": status_txt, "Omzet": f"€ {omzet:.2f}" if omzet > 0 else "-"})
         st.dataframe(pd.DataFrame(status_list), hide_index=True, use_container_width=True)
 
-    # --- SALDO ---
-    openings_saldo = calculate_current_saldo(datum_geselecteerd)
+    # --- EERST DATA CHECK VOOR VISUALISATIE ---
+    existing_data = get_data_by_date(datum_geselecteerd)
+    is_overwrite_mode = existing_data is not None
+    
+    is_gesloten_vink = False
+    
+    # Check voor gesloten status in DB
+    if is_overwrite_mode:
+        if float(existing_data['Totaal_Omzet']) == 0 and float(existing_data['Totaal_Geld']) == 0:
+            is_gesloten_vink = True
 
-    # --- INVOER FORMULIER ---
+    # --- INPUT VARIABELEN VOORBEREIDEN ---
+    omschr_value = existing_data.get("Omschrijving", "") if is_overwrite_mode else ""
+    
+    # Functie om data te laden
+    def get_val(col_name): return float(existing_data.get(col_name, 0.0)) if is_overwrite_mode else 0.00
+
+    # DATA GRID OPBOUWEN (Zodat we totalen hebben voor de check linksboven)
+    data_items = []
+    if use_0:  data_items.append({"Label": "🎫 0% (Vrijgesteld)", "Bedrag": get_val("Omzet_0"), "Type": "Omzet"})
+    if use_6:  data_items.append({"Label": "🎫 6% (Voeding)",     "Bedrag": get_val("Omzet_6"), "Type": "Omzet"})
+    if use_12: data_items.append({"Label": "🎫 12% (Horeca)",     "Bedrag": get_val("Omzet_12"), "Type": "Omzet"})
+    if use_21: data_items.append({"Label": "🎫 21% (Algemeen)",   "Bedrag": get_val("Omzet_21"), "Type": "Omzet"})
+    data_items.append({"Label": "⬇️ --- BETAALWIJZEN --- ⬇️", "Bedrag": None, "Type": "Separator"})
+    if use_bc:   data_items.append({"Label": "💳 Bancontact",     "Bedrag": get_val("Geld_Bancontact"), "Type": "Geld"})
+    if use_cash: data_items.append({"Label": "💶 Cash (Lade)",    "Bedrag": get_val("Geld_Cash"), "Type": "Geld"})
+    if use_payq: data_items.append({"Label": "📱 Payconiq",       "Bedrag": get_val("Geld_Payconiq"), "Type": "Geld"})
+    if use_over: data_items.append({"Label": "🏦 Overschrijving", "Bedrag": get_val("Geld_Overschrijving"), "Type": "Geld"})
+    if use_vouc: data_items.append({"Label": "🎁 Bonnen",         "Bedrag": get_val("Geld_Bonnen"), "Type": "Geld"})
+    data_items.append({"Label": "⬇️ --- KAS UITGAVEN --- ⬇️", "Bedrag": None, "Type": "Separator"})
+    data_items.append({"Label": "🏦 Afstorting naar Bank",    "Bedrag": get_val("Geld_Afstorting"), "Type": "Afstorting"})
+
+    df_start = pd.DataFrame(data_items)
+
+    # --- DATUM & HEADER SECTIE ---
+    
+    # 1. Bepaal status voor de LINKER blok
+    status_html = ""
+    if is_gesloten_vink:
+        status_html = "<div class='check-blue'>💤 GESLOTEN</div>"
+    elif existing_data is not None:
+        # Check balans van opgeslagen data
+        omz = float(existing_data['Totaal_Omzet'])
+        gld = float(existing_data['Totaal_Geld'])
+        diff = round(omz - gld, 2)
+        if diff == 0 and omz > 0:
+            status_html = f"<div class='check-green'>✅ OK: € {omz:.2f}</div>"
+        else:
+            status_html = f"<div class='check-red'>❌ VERSCHIL: € {diff:.2f}</div>"
+    elif datum_geselecteerd > datetime.now().date():
+        status_html = "<div class='check-grey'>🔒 TOEKOMST</div>"
+    else:
+        status_html = "<div class='check-grey'>📝 NOG INVULLEN</div>"
+
+    # Status onder de dag
+    sub_status_txt = ""
+    sub_status_col = "grey"
+    if is_gesloten_vink:
+        sub_status_txt = "💤 Sluitingsdag"
+        sub_status_col = "blue"
+    elif is_overwrite_mode:
+        sub_status_txt = "✅ Reeds ingevuld"
+        sub_status_col = "green"
+    elif datum_geselecteerd > datetime.now().date():
+        sub_status_txt = "🔒 Toekomst"
+    else:
+        sub_status_txt = "❌ Nog in te vullen"
+        sub_status_col = "red"
+
+    dag_naam = datum_geselecteerd.strftime("%A").upper()
+
+    col_left, col_center, col_right = st.columns([1.5, 2, 1.5])
+    
+    with col_left:
+        # Linksboven: De Dag Controle Status
+        st.markdown(status_html, unsafe_allow_html=True)
+        st.markdown("<div style='height: 5px;'></div>", unsafe_allow_html=True)
+        st.button("⬅️ Vorige", on_click=prev_day, use_container_width=True)
+        
+    with col_center:
+        # Midden: De Dag
+        st.markdown(f"<h2 style='text-align: center; margin:0; padding:0;'>{dag_naam}</h2>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align: center; color: {sub_status_col}; font-weight: bold; margin-bottom: 5px;'>{sub_status_txt}</div>", unsafe_allow_html=True)
+        st.date_input(
+            "Selecteer datum", 
+            value=st.session_state.date_picker_val, 
+            max_value=datetime.now().date(), 
+            label_visibility="collapsed", 
+            key="date_picker_val", 
+            on_change=update_date
+        )
+
+    with col_right:
+        # Rechts: Volgende + Saldo info (optioneel)
+        is_today = (datum_geselecteerd >= datetime.now().date())
+        # We tonen hier beknopt het kassaldo als info
+        openings_saldo = calculate_current_saldo(datum_geselecteerd)
+        st.markdown(f"<div class='saldo-box'>💰 Saldo: € {openings_saldo:.2f}</div>", unsafe_allow_html=True)
+        st.button("Volgende ➡️", on_click=next_day, disabled=is_today, use_container_width=True)
+
+    st.divider()
+
+    # --- INVOER ---
     if datum_geselecteerd > datetime.now().date():
         st.info("📅 Deze dag ligt in de toekomst.")
     else:
-        existing_data = get_data_by_date(datum_geselecteerd)
-        is_overwrite_mode = existing_data is not None
-        
-        omschr_value = existing_data.get("Omschrijving", "") if is_overwrite_mode else ""
         omschrijving = st.text_input("Omschrijving", value=omschr_value, placeholder=f"Dagontvangsten {datum_geselecteerd.strftime('%d-%m-%Y')}", key=f"omschr_{datum_geselecteerd}")
 
-        # INACTIVITEIT
-        is_gesloten = st.checkbox("🚫 Zaak gesloten / Geen ontvangsten", value=False)
+        is_gesloten = st.checkbox("🚫 Zaak gesloten / Geen ontvangsten", value=is_gesloten_vink)
         
-        if is_overwrite_mode and not is_gesloten:
-            if float(existing_data['Totaal_Omzet']) == 0 and float(existing_data['Totaal_Geld']) == 0:
-                is_gesloten = True
-
         if is_gesloten:
             st.warning("⚠️ Status: GESLOTEN (Alles € 0,00)")
             som_omzet, som_geld, verschil, cash_in_today, cash_out_today = 0.0, 0.0, 0.0, 0.0, 0.0
             edited_df = None 
             if not omschrijving: omschrijving = "SLUITINGSDAG"
         else:
-            def get_val(col_name): return float(existing_data.get(col_name, 0.0)) if is_overwrite_mode else 0.00
-
-            data_items = []
-            if use_0:  data_items.append({"Label": "🎫 0% (Vrijgesteld)", "Bedrag": get_val("Omzet_0"), "Type": "Omzet"})
-            if use_6:  data_items.append({"Label": "🎫 6% (Voeding)",     "Bedrag": get_val("Omzet_6"), "Type": "Omzet"})
-            if use_12: data_items.append({"Label": "🎫 12% (Horeca)",     "Bedrag": get_val("Omzet_12"), "Type": "Omzet"})
-            if use_21: data_items.append({"Label": "🎫 21% (Algemeen)",   "Bedrag": get_val("Omzet_21"), "Type": "Omzet"})
-
-            data_items.append({"Label": "⬇️ --- BETAALWIJZEN --- ⬇️", "Bedrag": None, "Type": "Separator"})
-
-            if use_bc:   data_items.append({"Label": "💳 Bancontact",     "Bedrag": get_val("Geld_Bancontact"), "Type": "Geld"})
-            if use_cash: data_items.append({"Label": "💶 Cash (Lade)",    "Bedrag": get_val("Geld_Cash"), "Type": "Geld"})
-            if use_payq: data_items.append({"Label": "📱 Payconiq",       "Bedrag": get_val("Geld_Payconiq"), "Type": "Geld"})
-            if use_over: data_items.append({"Label": "🏦 Overschrijving", "Bedrag": get_val("Geld_Overschrijving"), "Type": "Geld"})
-            if use_vouc: data_items.append({"Label": "🎁 Bonnen",         "Bedrag": get_val("Geld_Bonnen"), "Type": "Geld"})
-            
-            data_items.append({"Label": "⬇️ --- KAS UITGAVEN --- ⬇️", "Bedrag": None, "Type": "Separator"})
-            data_items.append({"Label": "🏦 Afstorting naar Bank",    "Bedrag": get_val("Geld_Afstorting"), "Type": "Afstorting"})
-
-            df_start = pd.DataFrame(data_items)
-            
             edited_df = st.data_editor(
                 df_start,
                 column_config={
@@ -425,26 +441,25 @@ if app_mode == "Invoer":
 
         eind_saldo = openings_saldo + cash_in_today - cash_out_today
 
+        # --- FOOTER ---
         st.markdown("---")
         
-        c_links, c_rechts = st.columns(2)
-        with c_links:
-            st.markdown("#### 📊 Dag Controle")
-            if is_gesloten:
-                st.info("Status: Gesloten")
-            elif verschil == 0 and som_omzet > 0:
-                st.success(f"✅ Balans OK: € {som_omzet:.2f}")
-            elif som_omzet == 0:
-                st.info("Nog in te vullen")
-            else:
-                st.error(f"❌ Verschil: € {verschil:.2f}")
+        # We tonen de grote validatie alleen als we NIET gesloten zijn, want dan is het triviaal
+        if not is_gesloten:
+            c_links, c_rechts = st.columns(2)
+            with c_links:
+                if verschil == 0 and som_omzet > 0:
+                    st.success(f"✅ Balans OK: € {som_omzet:.2f}")
+                elif som_omzet == 0:
+                    st.info("Nog in te vullen")
+                else:
+                    st.error(f"❌ Verschil: € {verschil:.2f}")
 
-        with c_rechts:
-            st.markdown("#### 💰 Kassaldo")
-            st.write(f"Begin: € {openings_saldo:.2f}")
-            st.write(f"+ Cash: € {cash_in_today:.2f}")
-            st.write(f"- Bank: € {cash_out_today:.2f}")
-            st.markdown(f"**= Eind: € {eind_saldo:.2f}**")
+            with c_rechts:
+                st.write(f"Begin Saldo: **€ {openings_saldo:.2f}**")
+                st.write(f"+ Cash: € {cash_in_today:.2f}")
+                st.write(f"- Bank: € {cash_out_today:.2f}")
+                st.markdown(f"**= Eind Saldo: € {eind_saldo:.2f}**")
 
         st.divider()
         
@@ -487,7 +502,6 @@ elif app_mode == "Export (Yuki)":
         else: st.warning("Geen data.")
 
 elif app_mode == "Instellingen":
-    # (Zelfde als voorheen)
     st.header("⚙️ Rekeningen")
     current_settings = load_settings()
     edited_settings = st.data_editor(current_settings, hide_index=True, use_container_width=True, num_rows="fixed")
