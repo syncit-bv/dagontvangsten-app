@@ -17,60 +17,50 @@ SETTINGS_FILE = "kassa_settings.csv"
 CONFIG_FILE = "kassa_config.json"
 ADMIN_PASSWORD = "Yuki2025!" 
 
-st.set_page_config(page_title="Dagontvangsten", page_icon="💶", layout="centered")
+st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="centered")
 
-# --- CSS STYLING (AANGEPAST VOOR UITLIJNING) ---
+# --- CSS STYLING ---
 st.markdown("""
     <style>
-    /* Algemene witruimte verkleinen */
     .block-container { padding-top: 2rem; padding-bottom: 2rem; }
     
-    /* Uniforme Info Boxen (Links & Rechts) */
     .info-card {
-        height: 50px; /* Vaste hoogte dwingt uitlijning af */
+        height: 50px;
         display: flex;
         align-items: center;
         justify-content: center;
         border-radius: 8px;
         font-weight: bold;
         font-size: 0.95rem;
-        margin-bottom: 10px; /* Ruimte tot aan de knop */
+        margin-bottom: 10px;
         border: 1px solid rgba(49, 51, 63, 0.1);
     }
     
-    /* Kleurvarianten */
     .card-red   { background-color: #fce8e6; color: #a30f0f; }
     .card-green { background-color: #e6fcf5; color: #0f5132; }
     .card-grey  { background-color: #f0f2f6; color: #31333f; }
     .card-blue  { background-color: #e7f5ff; color: #004085; }
     
-    /* De Dagnaam in het midden */
     .day-header {
         text-align: center;
-        font-size: 1.3rem; /* Stuk kleiner dan voorheen */
+        font-size: 1.3rem;
         font-weight: 700;
         margin-bottom: 0px;
         color: #31333f;
     }
     
-    /* De status tekst onder de dagnaam */
     .sub-status {
         text-align: center;
         font-size: 0.85rem;
         margin-bottom: 5px;
     }
     
-    /* Zorg dat knoppen de volledige breedte pakken */
     div.stButton > button { width: 100%; }
-    
-    /* Date input compacter maken */
     div[data-testid="stDateInput"] { text-align: center; }
     </style>
     """, unsafe_allow_html=True)
 
 # --- FUNCTIES ---
-# (Deze blijven identiek aan de vorige versie, ik kort ze hier even in voor leesbaarheid, 
-#  maar je moet je volledige functies behouden!)
 
 def load_config():
     default_config = {"start_saldo": 0.0, "laatste_update": str(datetime.now().date())}
@@ -139,10 +129,12 @@ def save_transaction(datum, omschrijving, df_input, totaal_omzet, totaal_geld, v
     df_db = load_database()
     datum_str = str(datum)
     df_db = df_db[df_db['Datum'] != datum_str]
+    
     if df_input is None: df_input = pd.DataFrame(columns=['Label', 'Bedrag'])
     if not omschrijving or omschrijving.strip() == "" or omschrijving == "nan":
         datum_fmt = pd.to_datetime(datum).strftime('%d-%m-%Y')
         omschrijving = f"Dagontvangsten {datum_fmt}"
+        
     new_row = {
         "Datum": datum_str, "Omschrijving": omschrijving, "Totaal_Omzet": totaal_omzet, "Totaal_Geld": totaal_geld, "Verschil": verschil,
         "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -205,8 +197,7 @@ if 'reset_count' not in st.session_state: st.session_state.reset_count = 0
 if 'show_success_toast' not in st.session_state: st.session_state['show_success_toast'] = False
 if 'date_picker_val' not in st.session_state: st.session_state.date_picker_val = datetime.now().date()
 
-def prev_day(): 
-    st.session_state.date_picker_val -= timedelta(days=1)
+def prev_day(): st.session_state.date_picker_val -= timedelta(days=1)
 def next_day(): 
     if st.session_state.date_picker_val < datetime.now().date():
         st.session_state.date_picker_val += timedelta(days=1)
@@ -283,39 +274,32 @@ if app_mode == "Invoer":
 
     # --- HEADER SECTIE ---
     
-    # 1. Bepaal Statussen en Teksten
     check_data = get_data_by_date(datum_geselecteerd)
     openings_saldo = calculate_current_saldo(datum_geselecteerd)
     
-    # Status Linksboven (Controle)
+    # Linksboven: Status
     if check_data is not None:
         omz = float(check_data['Totaal_Omzet'])
         gld = float(check_data['Totaal_Geld'])
-        if omz == 0 and gld == 0:
-            status_html = "<div class='info-card card-blue'>💤 GESLOTEN</div>"
-        else:
-            status_html = f"<div class='info-card card-green'>✅ OK: € {omz:.2f}</div>"
+        if omz == 0 and gld == 0: status_html = "<div class='info-card card-blue'>💤 GESLOTEN</div>"
+        else: status_html = f"<div class='info-card card-green'>✅ OK: € {omz:.2f}</div>"
     elif datum_geselecteerd > datetime.now().date():
         status_html = "<div class='info-card card-grey'>🔒 TOEKOMST</div>"
     else:
         status_html = "<div class='info-card card-red'>📝 NOG INVULLEN</div>"
 
-    # Status Rechtsboven (Saldo)
+    # Rechtsboven: Saldo
     saldo_html = f"<div class='info-card card-grey'>💰 Saldo: € {openings_saldo:.2f}</div>"
 
-    # Dagnaam en Statusregel
+    # Midden: Dagnaam
     dag_naam = datum_geselecteerd.strftime("%A").upper()
     if check_data is not None:
-        sub_txt = "✅ Reeds verwerkt"
-        sub_col = "green"
+        sub_txt, sub_col = "✅ Reeds verwerkt", "green"
     elif datum_geselecteerd > datetime.now().date():
-        sub_txt = "🔒 Toekomst"
-        sub_col = "grey"
+        sub_txt, sub_col = "🔒 Toekomst", "grey"
     else:
-        sub_txt = "❌ Nog in te vullen"
-        sub_col = "red"
+        sub_txt, sub_col = "❌ Nog in te vullen", "red"
 
-    # 2. De Layout Grid
     col_left, col_center, col_right = st.columns([1.5, 2, 1.5])
     
     with col_left:
@@ -352,19 +336,23 @@ if app_mode == "Invoer":
             if not omschrijving: omschrijving = "SLUITINGSDAG"
         else:
             def get_val(col_name): return float(existing_data.get(col_name, 0.0)) if is_overwrite_mode else 0.00
+            
+            # --- HIER IS DE WIJZIGING: GEEN TUSSENREGELS MEER ---
             data_items = []
             if use_0:  data_items.append({"Label": "🎫 0% (Vrijgesteld)", "Bedrag": get_val("Omzet_0"), "Type": "Omzet"})
             if use_6:  data_items.append({"Label": "🎫 6% (Voeding)",     "Bedrag": get_val("Omzet_6"), "Type": "Omzet"})
             if use_12: data_items.append({"Label": "🎫 12% (Horeca)",     "Bedrag": get_val("Omzet_12"), "Type": "Omzet"})
             if use_21: data_items.append({"Label": "🎫 21% (Algemeen)",   "Bedrag": get_val("Omzet_21"), "Type": "Omzet"})
-            data_items.append({"Label": "⬇️ --- BETAALWIJZEN --- ⬇️", "Bedrag": None, "Type": "Separator"})
+            
+            # Direct door naar betaalmethoden (Geen separator meer!)
             if use_bc:   data_items.append({"Label": "💳 Bancontact",     "Bedrag": get_val("Geld_Bancontact"), "Type": "Geld"})
             if use_cash: data_items.append({"Label": "💶 Cash (Lade)",    "Bedrag": get_val("Geld_Cash"), "Type": "Geld"})
             if use_payq: data_items.append({"Label": "📱 Payconiq",       "Bedrag": get_val("Geld_Payconiq"), "Type": "Geld"})
             if use_over: data_items.append({"Label": "🏦 Overschrijving", "Bedrag": get_val("Geld_Overschrijving"), "Type": "Geld"})
             if use_vouc: data_items.append({"Label": "🎁 Bonnen",         "Bedrag": get_val("Geld_Bonnen"), "Type": "Geld"})
-            data_items.append({"Label": "⬇️ --- KAS UITGAVEN --- ⬇️", "Bedrag": None, "Type": "Separator"})
-            data_items.append({"Label": "🏦 Afstorting naar Bank",    "Bedrag": get_val("Geld_Afstorting"), "Type": "Afstorting"})
+            
+            # Afstorting ook direct erachteraan
+            data_items.append({"Label": "🏧 Afstorting naar Bank",    "Bedrag": get_val("Geld_Afstorting"), "Type": "Afstorting"})
 
             df_start = pd.DataFrame(data_items)
             edited_df = st.data_editor(
