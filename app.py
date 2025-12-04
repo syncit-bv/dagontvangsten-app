@@ -20,12 +20,22 @@ ADMIN_PASSWORD = "Yuki2025!"
 
 st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="centered")
 
-# --- CSS STYLING (HERSTELD: Menu knop is terug zichtbaar) ---
+# --- CSS STYLING (FIXED: Transparante Header) ---
 st.markdown("""
     <style>
-    /* CSS voor witruimte, maar ZONDER de header te verbergen */
-    .block-container { padding-top: 1rem; padding-bottom: 2rem; }
+    /* 1. Header Transparant Maken (Zodat hij niet over tekst heen komt) */
+    header[data-testid="stHeader"] {
+        background-color: transparent !important;
+        z-index: 1; /* Zorg dat de menuknop wel bovenop blijft liggen */
+    }
     
+    /* 2. Inhoud naar boven trekken, maar ruimte laten voor de menuknop */
+    .block-container { 
+        padding-top: 2.5rem !important; 
+        padding-bottom: 2rem; 
+    }
+    
+    /* 3. Styling van de Info Kaarten */
     .info-card {
         height: 50px; display: flex; align-items: center; justify-content: center;
         border-radius: 8px; font-weight: bold; font-size: 0.95rem; margin-bottom: 10px;
@@ -90,13 +100,13 @@ def load_settings():
 def save_settings(df_settings): df_settings.to_csv(SETTINGS_FILE, index=False)
 def get_yuki_mapping():
     df = load_settings()
+    # Mapping voor Codes en Labels
     rekening_map = dict(zip(df.Code, df.Rekening))
     label_map = dict(zip(df.Code, df.Label))
     return rekening_map, label_map
 
 # --- EXPORT CONFIG ---
 def get_default_export_config():
-    # BTW Code verwijderd zoals gevraagd
     return [
         {"Kolom": "Grootboekrekening kas", "Bron": "Vast", "Waarde": "570000"},
         {"Kolom": "Kas omschrijving",      "Bron": "Vast", "Waarde": "Dagontvangsten"},
@@ -114,7 +124,6 @@ def get_default_export_config():
 def load_export_config():
     if os.path.exists(EXPORT_CONFIG_FILE):
         df = pd.read_csv(EXPORT_CONFIG_FILE)
-        # Verwijder BTW Code uit bestaande config indien aanwezig
         if "BTW Code" in df["Kolom"].values:
             df = df[df["Kolom"] != "BTW Code"]
             df.to_csv(EXPORT_CONFIG_FILE, index=False)
@@ -193,7 +202,7 @@ def handle_save_click(datum, omschrijving, edited_df, som_omzet, som_geld, versc
     st.session_state.omschrijving = "" 
     st.session_state['show_success_toast'] = True
 
-# --- DYNAMISCHE EXPORT ENGINE (AANGEPAST) ---
+# --- EXPORT ENGINE ---
 
 def generate_flexible_export(start_date, end_date):
     df_data = load_database()
@@ -203,7 +212,6 @@ def generate_flexible_export(start_date, end_date):
     mask = (df_data['Datum'] >= str(start_date)) & (df_data['Datum'] <= str(end_date))
     selection = df_data.loc[mask]
     
-    # FIX: Sortering Oplopend (Oud naar Nieuw)
     selection = selection.sort_values(by="Datum", ascending=True)
     
     if selection.empty: return None
@@ -218,33 +226,23 @@ def generate_flexible_export(start_date, end_date):
         
         transactions = []
         
-        # Helper: trx_type bepaalt of we de volledige omschrijving nemen (Omzet) of enkel label (Payment)
         def add_trx(code_key, bedrag, btw, trx_type="Omzet", label_override=None):
             rekening = CODES.get(code_key, "")
             
-            # FIX: Omschrijvingen logica
             if trx_type == "Payment":
-                # Enkel de naam van de betaalwijze (bv "Bancontact")
                 note = LABELS.get(code_key, label_override)
             else:
-                # Voor omzet: label (bv "Omzet 21%")
                 note = label_override 
 
             transactions.append({
-                "Rek": rekening, 
-                "Bedrag": bedrag, 
-                "Btw": btw, 
-                "Note": note,
-                "Type": trx_type
+                "Rek": rekening, "Bedrag": bedrag, "Btw": btw, "Note": note, "Type": trx_type
             })
 
-        # 1. OMZET
         if row['Omzet_21'] > 0: add_trx("Omzet_21", row['Omzet_21'], "V21", "Omzet", "Omzet 21%")
         if row['Omzet_12'] > 0: add_trx("Omzet_12", row['Omzet_12'], "V12", "Omzet", "Omzet 12%")
         if row['Omzet_6'] > 0:  add_trx("Omzet_6",  row['Omzet_6'],  "V6",  "Omzet", "Omzet 6%")
         if row['Omzet_0'] > 0:  add_trx("Omzet_0",  row['Omzet_0'],  "V0",  "Omzet", "Omzet 0%")
         
-        # 2. GELD (Type = Payment -> Neemt enkel label)
         if row['Geld_Bancontact'] > 0:   add_trx("Bancontact", -row['Geld_Bancontact'], "", "Payment")
         if row['Geld_Payconiq'] > 0:     add_trx("Payconiq",   -row['Geld_Payconiq'],   "", "Payment")
         if row['Geld_Overschrijving'] > 0: add_trx("Oversch",  -row['Geld_Overschrijving'], "", "Payment")
@@ -265,15 +263,9 @@ def generate_flexible_export(start_date, end_date):
                 elif source == "Veld":
                     if val_key == "Datum": final_val = datum_fmt
                     elif val_key == "Omschrijving": 
-                        # AANGEPAST: Afhankelijk van type
-                        if t['Type'] == 'Payment':
-                            final_val = t['Note'] # Puur "Bancontact"
-                        else:
-                            final_val = f"{desc_base} ({t['Note']})" # "Dagontvangsten... (Omzet 21%)"
-                            
-                    elif val_key == "Bedrag": 
-                        final_val = f"{-t['Bedrag']:.2f}".replace('.',',')
-                        
+                        if t['Type'] == 'Payment': final_val = t['Note'] 
+                        else: final_val = f"{desc_base} ({t['Note']})"
+                    elif val_key == "Bedrag": final_val = f"{-t['Bedrag']:.2f}".replace('.',',')
                     elif val_key == "Grootboekrekening": final_val = t['Rek']
                     elif val_key == "BtwCode": final_val = t['Btw']
                 
@@ -339,7 +331,7 @@ if app_mode == "Invoer":
     
     datum_geselecteerd = st.session_state.date_picker_val
     
-    # --- HEADER ---
+    # Header & Status
     check_data = get_data_by_date(datum_geselecteerd)
     openings_saldo = calculate_current_saldo(datum_geselecteerd)
     
@@ -372,7 +364,7 @@ if app_mode == "Invoer":
 
     st.divider()
 
-    # --- INVOER ---
+    # Invoer
     if datum_geselecteerd > datetime.now().date(): st.info("Toekomst.")
     else:
         existing_data = get_data_by_date(datum_geselecteerd)
@@ -447,7 +439,7 @@ if app_mode == "Invoer":
                   on_click=handle_save_click,
                   args=(datum_geselecteerd, omschrijving, edited_df, som_omzet, som_geld, verschil))
 
-    # --- MAAND OVERZICHT (HERSTELD NAAR ONDERAAN) ---
+    # --- MAAND OVERZICHT (ONDERAAN) ---
     with st.expander("📅 Bekijk status maandoverzicht", expanded=False):
         huidige_maand = datum_geselecteerd.month
         huidig_jaar = datum_geselecteerd.year
@@ -472,7 +464,6 @@ if app_mode == "Invoer":
         st.dataframe(pd.DataFrame(status_list), hide_index=True, use_container_width=True)
 
 elif app_mode == "Kassaldo Beheer":
-    # (Bestaande code)
     st.header("💰 Kassaldo Beheer")
     st.info("Stel hier het initiële startsaldo in.")
     config = load_config()
@@ -484,7 +475,6 @@ elif app_mode == "Kassaldo Beheer":
         st.success("Opgeslagen!")
 
 elif app_mode == "Export (Yuki)":
-    # (Bestaande code)
     st.header("📤 Export Yuki")
     col_start, col_end = st.columns(2)
     start_date = col_start.date_input("Van", datetime(datetime.now().year, datetime.now().month, 1))
@@ -499,18 +489,15 @@ elif app_mode == "Export (Yuki)":
         else: st.warning("Geen data.")
 
 elif app_mode == "Export Configuratie":
-    # (Bestaande code)
     st.header("📤 Export Configuratie")
     current_export_config = load_export_config()
     source_options = ["Vast", "Veld"]
-    internal_fields = ["Datum", "Omschrijving", "Bedrag", "Grootboekrekening", "BtwCode"]
     edited_export = st.data_editor(current_export_config, column_config={"Kolom": st.column_config.TextColumn("CSV Kolom", required=True), "Bron": st.column_config.SelectboxColumn("Type", options=source_options), "Waarde": st.column_config.TextColumn("Waarde")}, num_rows="dynamic", use_container_width=True, hide_index=True)
     if st.button("💾 Opslaan", type="primary"):
         save_export_config(edited_export)
         st.success("Opgeslagen!")
 
 elif app_mode == "Instellingen":
-    # (Bestaande code)
     st.header("⚙️ Rekeningen")
     current_settings = load_settings()
     edited_settings = st.data_editor(current_settings, hide_index=True, use_container_width=True, num_rows="fixed")
