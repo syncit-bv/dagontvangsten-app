@@ -5,34 +5,28 @@ import time
 import os
 import locale
 
-# Probeer de taal op Nederlands te zetten voor de dagnamen (indien ondersteund door systeem)
-try:
-    locale.setlocale(locale.LC_TIME, 'nl_NL.UTF-8')
-except:
-    try:
-        locale.setlocale(locale.LC_TIME, 'nld_nld') # Windows notatie
-    except:
-        pass # Fallback naar Engels als NL niet beschikbaar is
+# Probeer NL tijdnotatie (niet kritiek, fallback naar default)
+try: locale.setlocale(locale.LC_TIME, 'nl_NL.UTF-8')
+except: pass
 
 # --- CONFIGURATIE ---
 DATA_FILE = "kassa_historiek.csv"
 SETTINGS_FILE = "kassa_settings.csv"
 ADMIN_PASSWORD = "Yuki2025!" 
 
-st.set_page_config(page_title="Kassa App", page_icon="💶", layout="centered")
+st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="centered")
 
-# CSS Styling - Knoppen mooier uitlijnen
+# CSS Styling
 st.markdown("""
     <style>
     .block-container { padding-top: 3rem; padding-bottom: 2rem; }
     [data-testid="stDataFrameResizable"] { border: 1px solid #ddd; border-radius: 5px; }
     .stAlert { margin-top: 1rem; }
-    /* Zorg dat de datum navigatie knoppen op één lijn staan */
     div.stButton > button { width: 100%; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNCTIES (Dezelfde als voorheen, maar load_settings iets compacter) ---
+# --- FUNCTIES ---
 
 def get_default_settings():
     return [
@@ -116,7 +110,6 @@ def save_transaction(datum, omschrijving, df_input, totaal_omzet, totaal_geld, v
 def handle_save_click(datum, omschrijving, edited_df, som_omzet, som_geld, verschil):
     save_transaction(datum, omschrijving, edited_df, som_omzet, som_geld, verschil)
     st.session_state.reset_count += 1
-    # We legen de omschrijving NIET als we in een flow zitten, maar voor nu wel veiliger
     st.session_state.omschrijving = "" 
     st.session_state['show_success_toast'] = True
 
@@ -143,20 +136,11 @@ def generate_yuki_export(start_date, end_date):
 # --- STATE ---
 if 'reset_count' not in st.session_state: st.session_state.reset_count = 0
 if 'show_success_toast' not in st.session_state: st.session_state['show_success_toast'] = False
+if 'current_date' not in st.session_state: st.session_state.current_date = datetime.now().date()
 
-# HIER IS DE NIEUWE LOGICA VOOR DATUM NAVIGATIE
-if 'current_date' not in st.session_state:
-    st.session_state.current_date = datetime.now().date()
-
-def prev_day():
-    st.session_state.current_date -= timedelta(days=1)
-def next_day():
-    st.session_state.current_date += timedelta(days=1)
-def set_today():
-    st.session_state.current_date = datetime.now().date()
-def update_date():
-    # Callback voor als de gebruiker handmatig de datum picker gebruikt
-    st.session_state.current_date = st.session_state.date_picker_val
+def prev_day(): st.session_state.current_date -= timedelta(days=1)
+def next_day(): st.session_state.current_date += timedelta(days=1)
+def update_date(): st.session_state.current_date = st.session_state.date_picker_val
 
 # ==========================================
 # ⚙️ SIDEBAR
@@ -166,6 +150,7 @@ with st.sidebar:
     pwd = st.text_input("Boekhouder Login", type="password", placeholder="Wachtwoord")
     is_admin = (pwd == ADMIN_PASSWORD)
     app_mode = "Invoer" 
+    
     if is_admin:
         st.success("🔓 Toegang verleend")
         app_mode = st.radio("Kies scherm:", ["Invoer", "Export (Yuki)", "Instellingen"])
@@ -173,14 +158,43 @@ with st.sidebar:
         if os.path.exists(DATA_FILE):
              with open(DATA_FILE, "rb") as f:
                 st.download_button("📥 Backup (.csv)", f, "backup_db.csv", "text/csv")
+    
     st.divider()
+    
     if app_mode == "Invoer":
-        st.subheader("Weergave")
-        use_0  = st.checkbox("0% (Vrijgesteld)", value=True)
-        use_6  = st.checkbox("6% (Voeding)", value=True)
-        use_12 = st.checkbox("12% (Horeca)", value=False)
-        use_21 = st.checkbox("21% (Algemeen)", value=True)
+        st.subheader("Profiel & Sector")
+        
+        # --- HIER IS DE NIEUWE SECTOR SELECTOR ---
+        sector_keuze = st.selectbox(
+            "Kies uw activiteit:", 
+            ["Detailhandel (Standaard)", "Huisarts/Kiné (Medisch)", "Tandarts (Gemengd)", "Horeca/Café", "Bakkerij"]
+        )
+        
+        st.caption(f"Actief profiel: {sector_keuze}")
+        
+        # Bepaal defaults op basis van sector
+        def_0, def_6, def_12, def_21 = True, True, False, True # Default Retail
+        
+        if "Medisch" in sector_keuze:
+            def_0, def_6, def_12, def_21 = True, False, False, False # Alleen 0%
+        elif "Tandarts" in sector_keuze:
+            def_0, def_6, def_12, def_21 = True, False, False, True # 0% en 21%
+        elif "Horeca" in sector_keuze:
+            def_0, def_6, def_12, def_21 = False, False, True, True # 12% en 21% (en 0% voor fooi soms)
+        elif "Bakkerij" in sector_keuze:
+            def_0, def_6, def_12, def_21 = False, True, False, True # 6% en 21%
+            
         st.markdown("---")
+        st.write("**BTW Configuratie:**")
+        
+        # De checkboxes luisteren nu naar de defaults
+        use_0  = st.checkbox("0% (Vrijgesteld)", value=def_0)
+        use_6  = st.checkbox("6% (Voeding/Krant)", value=def_6)
+        use_12 = st.checkbox("12% (Horeca/Maaltijd)", value=def_12)
+        use_21 = st.checkbox("21% (Algemeen/Drank)", value=def_21)
+        
+        st.markdown("---")
+        st.write("**Betaalopties:**")
         use_bc   = st.checkbox("Bancontact", value=True)
         use_cash = st.checkbox("Cash", value=True)
         use_payq = st.checkbox("Payconiq", value=True)
@@ -195,56 +209,35 @@ if app_mode == "Invoer":
         st.toast("Succesvol opgeslagen!", icon="✅")
         st.session_state['show_success_toast'] = False
 
-    # --- NIEUWE DATUM NAVIGATIE SECTIE ---
-    
-    # Check status voor huidige datum
+    # DATUM NAVIGATIE
     check_data = get_data_by_date(st.session_state.current_date)
     status_icon = "🟢" if check_data is not None else "⚪"
-    status_text = "Reeds ingevuld" if check_data is not None else "Nog niet ingevuld"
-    
-    # Weergave van Dagnaam (bv. "MAANDAG")
+    status_text = "Ingevuld" if check_data is not None else "Nog leeg"
     dag_naam = st.session_state.current_date.strftime("%A").upper()
     
-    # De Navigatie Balk
     col_prev, col_pick, col_next = st.columns([1, 2, 1])
-    
-    with col_prev:
-        st.button("⬅️ Vorige", on_click=prev_day, use_container_width=True)
-    
+    with col_prev: st.button("⬅️ Vorige", on_click=prev_day, use_container_width=True)
     with col_pick:
-        # We gebruiken een key 'date_picker_val' en een callback om sync te houden
-        selected_date = st.date_input(
-            "Datum Selectie", 
-            value=st.session_state.current_date, 
-            label_visibility="collapsed",
-            key="date_picker_val",
-            on_change=update_date
-        )
-        # Visuele datum status
-        st.markdown(f"<div style='text-align: center; font-weight: bold; font-size: 1.2em; margin-top: -10px;'>{dag_naam}</div>", unsafe_allow_html=True)
+        selected_date = st.date_input("Datum", value=st.session_state.current_date, label_visibility="collapsed", key="date_picker_val", on_change=update_date)
+        st.markdown(f"<div style='text-align: center; font-weight: bold; font-size: 1.1em;'>{dag_naam}</div>", unsafe_allow_html=True)
         st.markdown(f"<div style='text-align: center; color: grey; font-size: 0.9em;'>{status_icon} {status_text}</div>", unsafe_allow_html=True)
-        
-    with col_next:
-        st.button("Volgende ➡️", on_click=next_day, use_container_width=True)
+    with col_next: st.button("Volgende ➡️", on_click=next_day, use_container_width=True)
 
     st.divider()
 
-    # Gebruik de navigatie datum voor de rest van de logica
     datum = st.session_state.current_date
-
-    # --- OMSCHRIJVING & DATA OPHALEN ---
     existing_data = get_data_by_date(datum)
     is_overwrite_mode = existing_data is not None
 
-    omschrijving = st.text_input("Omschrijving / Notitie", 
-                                 value=existing_data.get("Omschrijving", "") if is_overwrite_mode else "",
-                                 placeholder="Bijv. Dagtotaal winkel...", 
-                                 key=f"omschr_{datum}")
+    omschrijving = st.text_input("Omschrijving", value=existing_data.get("Omschrijving", "") if is_overwrite_mode else "", placeholder="Notitie...", key=f"omschr_{datum}")
 
     def get_val(col_name):
         return float(existing_data.get(col_name, 0.0)) if is_overwrite_mode else 0.00
 
+    # DATA GRID OPBOUWEN
     data_items = []
+    
+    # Hier gebruiken we de variabelen die door de Sector Kiezer zijn beïnvloed
     if use_0:  data_items.append({"Label": "🎫 0% (Vrijgesteld)", "Bedrag": get_val("Omzet_0"), "Type": "Omzet"})
     if use_6:  data_items.append({"Label": "🎫 6% (Voeding)",     "Bedrag": get_val("Omzet_6"), "Type": "Omzet"})
     if use_12: data_items.append({"Label": "🎫 12% (Horeca)",     "Bedrag": get_val("Omzet_12"), "Type": "Omzet"})
@@ -259,11 +252,10 @@ if app_mode == "Invoer":
 
     df_start = pd.DataFrame(data_items)
     
-    # WAARSCHUWING (Visueel minder agressief gemaakt)
     overwrite_confirmed = True
     if is_overwrite_mode:
-        st.info(f"✏️ Je bewerkt nu een bestaande dag.")
-        overwrite_confirmed = st.checkbox("Ik wil de bestaande gegevens wijzigen", value=False)
+        st.info(f"✏️ Bewerkingsmodus")
+        overwrite_confirmed = st.checkbox("Ik wil wijzigingen opslaan", value=False)
 
     edited_df = st.data_editor(
         df_start,
@@ -287,20 +279,19 @@ if app_mode == "Invoer":
     c_inf, c_btn = st.columns([1, 1])
 
     with c_inf:
-        if som_omzet == 0: st.info("👆 Vul de gegevens in.")
-        elif verschil == 0: st.markdown(f"### ✅ :green[OK: € {som_omzet:.2f}]")
-        else: st.markdown(f"### ❌ :red[Verschil: € {verschil:.2f}]")
+        if som_omzet == 0: st.info("👆 Vul in")
+        elif verschil == 0: st.markdown(f"### ✅ :green[€ {som_omzet:.2f}]")
+        else: st.markdown(f"### ❌ :red[€ {verschil:.2f}]")
 
     with c_btn:
         is_valid = (som_omzet > 0) and (verschil == 0) and overwrite_confirmed
-        label = "🔄 Wijziging Opslaan" if is_overwrite_mode else "💾 Opslaan"
-        
+        label = "🔄 Opslaan" if is_overwrite_mode else "💾 Opslaan"
         st.button(label, type="primary", disabled=not is_valid, use_container_width=True,
                   on_click=handle_save_click,
                   args=(datum, omschrijving, edited_df, som_omzet, som_geld, verschil))
 
 elif app_mode == "Export (Yuki)":
-    # (Zelfde export code als voorheen, ingekort voor leesbaarheid)
+    # (Export scherm code)
     st.header("📤 Export voor Boekhouding")
     col_start, col_end = st.columns(2)
     start_date = col_start.date_input("Van", datetime(datetime.now().year, datetime.now().month, 1))
@@ -308,18 +299,18 @@ elif app_mode == "Export (Yuki)":
     if st.button("Genereer Export Bestand", type="primary"):
         yuki_df = generate_yuki_export(start_date, end_date)
         if yuki_df is not None:
-            st.success(f"✅ {len(yuki_df)} boekingsregels gegenereerd.")
+            st.success(f"✅ {len(yuki_df)} regels.")
             st.dataframe(yuki_df, hide_index=True)
             csv = yuki_df.to_csv(sep=';', index=False).encode('utf-8')
-            st.download_button("📥 Download Yuki Bestand (.csv)", csv, f"yuki_export_{start_date}_{end_date}.csv", "text/csv")
+            st.download_button("📥 Download (.csv)", csv, f"yuki_export.csv", "text/csv")
         else:
-            st.warning("Geen gegevens gevonden in deze periode.")
+            st.warning("Geen data.")
 
 elif app_mode == "Instellingen":
-    # (Zelfde instellingen code als voorheen)
-    st.header("⚙️ Configureren")
+    # (Instellingen scherm code)
+    st.header("⚙️ Rekeningen")
     current_settings = load_settings()
     edited_settings = st.data_editor(current_settings, hide_index=True, use_container_width=True, num_rows="fixed")
-    if st.button("💾 Wijzigingen Opslaan", type="primary"):
+    if st.button("💾 Opslaan", type="primary"):
         save_settings(edited_settings)
         st.success("Opgeslagen!")
