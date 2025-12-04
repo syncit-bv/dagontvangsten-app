@@ -23,18 +23,16 @@ st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="ce
 # --- CSS STYLING ---
 st.markdown("""
     <style>
-    /* Header transparant maken */
+    /* Header transparant */
     header[data-testid="stHeader"] {
         background-color: transparent !important;
     }
     
-    /* Inhoud omhoog trekken */
     .block-container { 
         padding-top: 3.5rem !important; 
         padding-bottom: 2rem; 
     }
     
-    /* Info Kaarten */
     .info-card {
         height: 50px; display: flex; align-items: center; justify-content: center;
         border-radius: 8px; font-weight: bold; font-size: 0.95rem; margin-bottom: 10px;
@@ -82,25 +80,19 @@ def get_default_settings():
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
         df = pd.read_csv(SETTINGS_FILE, dtype={"Rekening": str, "BtwCode": str})
-        
-        # MIGRATE: Voeg ExportDesc toe als die mist
         if "ExportDesc" not in df.columns:
             st.toast("Instellingen bijgewerkt: Kolom 'Omschrijving' toegevoegd", icon="🛠️")
-            df["ExportDesc"] = df["Label"] # Default
+            df["ExportDesc"] = df["Label"]
             df.to_csv(SETTINGS_FILE, index=False)
-            
         if "Kas" in df["Code"].values:
             df.loc[df["Code"] == "Kas", "Code"] = "Cash"
             df.to_csv(SETTINGS_FILE, index=False)
-            
         defaults = pd.DataFrame(get_default_settings())
-        existing_codes = df["Code"].tolist()
         for code in ["Oversch", "Afstorting"]:
-            if code not in existing_codes:
+            if code not in df["Code"].values:
                 row = defaults[defaults["Code"] == code].iloc[0]
                 df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
                 df.to_csv(SETTINGS_FILE, index=False)
-                
         return df
     else:
         df = pd.DataFrame(get_default_settings())
@@ -246,7 +238,6 @@ def generate_flexible_export(start_date, end_date):
             label = info.get('Label', code_key)
             template = info.get('Template', '')
             
-            # VARIABELEN VERVANGEN
             final_desc = template.replace("&datum&", datum_fmt)
             final_desc = final_desc.replace("&notitie&", desc_user)
             if not final_desc: final_desc = f"{label} {datum_fmt}"
@@ -259,13 +250,10 @@ def generate_flexible_export(start_date, end_date):
                 "Label": label
             })
 
-        # OMZET
         if row['Omzet_21'] > 0: add_trx("Omzet_21", row['Omzet_21'], "V21")
         if row['Omzet_12'] > 0: add_trx("Omzet_12", row['Omzet_12'], "V12")
         if row['Omzet_6'] > 0:  add_trx("Omzet_6",  row['Omzet_6'],  "V6")
         if row['Omzet_0'] > 0:  add_trx("Omzet_0",  row['Omzet_0'],  "V0")
-        
-        # GELD
         if row['Geld_Bancontact'] > 0:   add_trx("Bancontact", -row['Geld_Bancontact'], "")
         if row['Geld_Payconiq'] > 0:     add_trx("Payconiq",   -row['Geld_Payconiq'],   "")
         if row['Geld_Overschrijving'] > 0: add_trx("Oversch",  -row['Geld_Overschrijving'], "")
@@ -353,7 +341,7 @@ if app_mode == "Invoer":
     
     datum_geselecteerd = st.session_state.date_picker_val
     
-    # Header & Status
+    # Header
     check_data = get_data_by_date(datum_geselecteerd)
     openings_saldo = calculate_current_saldo(datum_geselecteerd)
     
@@ -461,7 +449,7 @@ if app_mode == "Invoer":
                   on_click=handle_save_click,
                   args=(datum_geselecteerd, omschrijving, edited_df, som_omzet, som_geld, verschil))
 
-    # --- MAAND OVERZICHT (ONDERAAN) ---
+    # --- MAAND OVERZICHT ---
     with st.expander("📅 Bekijk status maandoverzicht", expanded=False):
         huidige_maand = datum_geselecteerd.month
         huidig_jaar = datum_geselecteerd.year
@@ -506,7 +494,7 @@ elif app_mode == "Export (Yuki)":
         if yuki_df is not None:
             st.success(f"{len(yuki_df)} regels.")
             st.dataframe(yuki_df, hide_index=True)
-            csv = yuki_df.to_csv(sep=';', index=False).encode('utf-8-sig')
+            csv = yuki_df.to_csv(sep=';', index=False).encode('utf-8')
             st.download_button("Download", csv, "export.csv", "text/csv")
         else: st.warning("Geen data.")
 
@@ -525,13 +513,14 @@ elif app_mode == "Instellingen":
     st.info("Gebruik &datum&, &label& of &notitie& in de tekst.")
     current_settings = load_settings()
     
+    # We tonen de 'Label' kolom nu als 'Naam / Categorie' en maken deze aanpasbaar!
     edited_settings = st.data_editor(
         current_settings, 
         column_config={
             "Code": None, 
-            "Label": st.column_config.TextColumn("Type", disabled=True),
-            "Rekening": st.column_config.TextColumn("Yuki Rekening"),
-            "ExportDesc": st.column_config.TextColumn("Omschrijving Template"),
+            "Label": st.column_config.TextColumn("Naam / Categorie (Voor Export)", required=True), # HIER: Bewerkbaar gemaakt
+            "Rekening": st.column_config.TextColumn("Grootboekrekening (Yuki)"),
+            "ExportDesc": st.column_config.TextColumn("Omschrijving Template (Export)"),
             "BtwCode": st.column_config.TextColumn("BTW Code"),
             "Type": None
         },
