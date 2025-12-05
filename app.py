@@ -209,7 +209,7 @@ def handle_save_click(datum, omschrijving, edited_df, som_omzet, som_geld, versc
     st.session_state.omschrijving = "" 
     st.session_state['show_success_toast'] = True
 
-# --- DYNAMISCHE EXPORT ENGINE (AANGEPAST: TEKENS OMGEDRAAID) ---
+# --- DYNAMISCHE EXPORT ENGINE (AANGEPAST: CORRECTE TEKENS) ---
 
 def generate_flexible_export(start_date, end_date):
     df_data = load_database()
@@ -253,25 +253,21 @@ def generate_flexible_export(start_date, end_date):
                 "Label": label
             })
 
-        # 1. OMZET (Credit = Negatief)
-        # We zetten er een minteken voor, want in DB is het positief
-        if row['Omzet_21'] > 0: add_trx("Omzet_21", -row['Omzet_21'], "V21")
-        if row['Omzet_12'] > 0: add_trx("Omzet_12", -row['Omzet_12'], "V12")
-        if row['Omzet_6'] > 0:  add_trx("Omzet_6",  -row['Omzet_6'],  "V6")
-        if row['Omzet_0'] > 0:  add_trx("Omzet_0",  -row['Omzet_0'],  "V0")
+        # OMZET (Positief)
+        if row['Omzet_21'] > 0: add_trx("Omzet_21", row['Omzet_21'], "V21")
+        if row['Omzet_12'] > 0: add_trx("Omzet_12", row['Omzet_12'], "V12")
+        if row['Omzet_6'] > 0:  add_trx("Omzet_6",  row['Omzet_6'],  "V6")
+        if row['Omzet_0'] > 0:  add_trx("Omzet_0",  row['Omzet_0'],  "V0")
         
-        # 2. GELD ONTVANGST (Debet = Positief)
-        # Dit is 'Geld In', dus Debet voor de kas, dus positief.
+        # GELD (Positief)
         if row['Geld_Bancontact'] > 0:   add_trx("Bancontact", row['Geld_Bancontact'], "")
         if row['Geld_Payconiq'] > 0:     add_trx("Payconiq",   row['Geld_Payconiq'],   "")
         if row['Geld_Overschrijving'] > 0: add_trx("Oversch",  row['Geld_Overschrijving'], "")
         if row['Geld_Bonnen'] > 0:       add_trx("Bonnen",     row['Geld_Bonnen'],     "")
-        
-        # Cash is speciaal: Debet voor kas = Positief
         if row['Geld_Cash'] > 0:         add_trx("Cash",       row['Geld_Cash'],       "")
         
-        # 3. AFSTORTING (Credit voor Kas = Negatief)
-        # Geld gaat UIT de kas naar de bank. Dus negatief voor het kasboek.
+        # AFSTORTING (Negatief = Geld uit kas)
+        # We zetten hier expliciet een minteken voor
         if row['Geld_Afstorting'] > 0:   add_trx("Afstorting", -row['Geld_Afstorting'], "")
 
         for t in transactions:
@@ -289,7 +285,7 @@ def generate_flexible_export(start_date, end_date):
                     elif val_key == "Omschrijving": final_val = t['Desc']
                     elif val_key == "Label": final_val = t['Label']       
                     elif val_key == "Bedrag": 
-                        # GEEN abs() meer, gewoon het getal met het juiste teken
+                        # HIER IS DE WIJZIGING: Geen abs() meer, teken respecteren
                         final_val = f"{t['Bedrag']:.2f}".replace('.',',')
                     elif val_key == "Grootboekrekening": final_val = t['Rek']
                     elif val_key == "BtwCode": final_val = t['Btw']
@@ -356,7 +352,7 @@ if app_mode == "Invoer":
     
     datum_geselecteerd = st.session_state.date_picker_val
     
-    # Header
+    # Header & Status
     check_data = get_data_by_date(datum_geselecteerd)
     openings_saldo = calculate_current_saldo(datum_geselecteerd)
     
@@ -535,7 +531,7 @@ elif app_mode == "Instellingen":
             "Code": None, 
             "Label": st.column_config.TextColumn("Label", required=True),
             "Rekening": st.column_config.TextColumn("Grootboekrekening", required=True),
-            "ExportDesc": st.column_config.TextColumn("Omschrijving"),
+            "ExportDesc": st.column_config.TextColumn("Omschrijving Template"),
             "BtwCode": st.column_config.TextColumn("BTW Code"),
             "Type": None
         },
