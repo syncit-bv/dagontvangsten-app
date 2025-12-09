@@ -24,16 +24,8 @@ st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="ce
 # --- CSS STYLING ---
 st.markdown("""
     <style>
-    /* Header transparant */
-    header[data-testid="stHeader"] {
-        background-color: transparent !important;
-    }
-    
-    .block-container { 
-        padding-top: 3.5rem !important; 
-        padding-bottom: 2rem; 
-    }
-    
+    header[data-testid="stHeader"] { background-color: transparent !important; }
+    .block-container { padding-top: 3.5rem !important; padding-bottom: 2rem; }
     .info-card {
         height: 50px; display: flex; align-items: center; justify-content: center;
         border-radius: 8px; font-weight: bold; font-size: 0.95rem; margin-bottom: 10px;
@@ -42,11 +34,8 @@ st.markdown("""
     .card-red   { background-color: #fce8e6; color: #a30f0f; }
     .card-green { background-color: #e6fcf5; color: #0f5132; }
     .card-grey  { background-color: #f0f2f6; color: #31333f; }
-    .card-blue  { background-color: #e7f5ff; color: #004085; }
-    
     .day-header { text-align: center; font-size: 1.3rem; font-weight: 700; margin-bottom: 0px; color: #31333f; }
     .sub-status { text-align: center; font-size: 0.85rem; margin-bottom: 5px; }
-    
     div.stButton > button { width: 100%; }
     div[data-testid="stDateInput"] { text-align: center; }
     .streamlit-expanderHeader { background-color: #f8f9fa; border-radius: 5px; }
@@ -71,7 +60,7 @@ def generate_valid_belgian_iban():
 def load_config():
     default_config = {
         "start_saldo": 0.0, 
-        "iban": "", # Standaard leeg, gebruiker moet invullen
+        "iban": "", 
         "bic": "KASSBE22",
         "coda_seq": 0,
         "laatste_update": str(datetime.now().date())
@@ -284,14 +273,14 @@ def generate_csv_export(start_date, end_date):
                     if val_key == "Datum": final_val = datum_fmt
                     elif val_key == "Omschrijving": final_val = t['Desc']
                     elif val_key == "Label": final_val = t['Label']       
-                    elif val_key == "Bedrag": final_val = f"{abs(t['Bedrag']):.2f}".replace('.',',') # POSITIEF in CSV
+                    elif val_key == "Bedrag": final_val = f"{abs(t['Bedrag']):.2f}".replace('.',',') 
                     elif val_key == "Grootboekrekening": final_val = t['Rek']
                     elif val_key == "BtwCode": final_val = t['Btw']
                 export_row[col_name] = final_val
             export_rows.append(export_row)
     return pd.DataFrame(export_rows)
 
-# --- CODA EXPORT ENGINE ---
+# --- CODA EXPORT ENGINE (GECORRIGEERD VERSIE 2.2) ---
 def generate_coda_export(start_date, end_date):
     df_data = load_database()
     config = load_config()
@@ -299,7 +288,7 @@ def generate_coda_export(start_date, end_date):
     selection = df_data.loc[mask].sort_values(by="Datum", ascending=True)
     if selection.empty: return None, None 
 
-    my_iban = config.get("iban", "").replace(" ", "")
+    my_iban = config.get("iban", "").replace(" ", "").strip()
     my_bic = config.get("bic", "KASSBE22")
     start_seq = int(config.get("coda_seq", 0)) + 1
     
@@ -339,7 +328,6 @@ def generate_coda_export(start_date, end_date):
                 info = MAPPING.get(code_key, {})
                 template = info.get('Template', '')
                 label = info.get('Label', code_key)
-                
                 desc_text = template.replace("&datum&", datum_dt.strftime('%d-%m-%Y')).replace("&notitie&", "")
                 if not desc_text: desc_text = label
                 
@@ -355,35 +343,38 @@ def generate_coda_export(start_date, end_date):
         new_balance = old_balance + daily_movement
         current_balance = new_balance
 
-        # 0. HEADER
+        # 0. HEADER (Eindigt op 2)
         line0 = f"0{seq_nr:04d}{datum_coda}{my_bic:<11}{my_iban:<34}{'':<67}2"
         coda_lines.append(line0.ljust(128)[:128])
 
-        # 1. OLD BALANCE
+        # 1. OLD BALANCE (Versie 2 = begint met 12)
         old_sign = "0" if old_balance >= 0 else "1"
         old_abs = abs(old_balance)
-        line1 = f"10{seq_nr:04d}{my_iban:<37}{old_sign}{old_abs:015.3f}".replace(".", "") + f"{datum_coda}{'':<63}"
+        # Structuur: 1 (Type) + 2 (Versie) + ...
+        line1 = f"12{seq_nr:04d}{my_iban:<37}{old_sign}{old_abs:015.3f}".replace(".", "") + f"{datum_coda}{'':<63}"
         coda_lines.append(line1.ljust(128)[:128])
 
         # 2. MOVEMENTS
         for trx in transactions:
             amount_str = f"{trx['amount']:015.3f}".replace(".", "")
+            # Structuur: 21 + ...
             line21 = f"21{seq_nr:04d}0000{'':<21}{trx['sign']}{amount_str}{datum_coda}{'':<53}"
             coda_lines.append(line21.ljust(128)[:128])
             record_count += 1
             
+            # Structuur: 22 + ...
             desc_short = trx['desc'][:53]
             line22 = f"22{seq_nr:04d}0000{'':<10}{desc_short:<53}{'':<53}" 
             coda_lines.append(line22.ljust(128)[:128])
             record_count += 1
 
-        # 8. NEW BALANCE
+        # 8. NEW BALANCE (Versie 2 = begint met 82)
         new_sign = "0" if new_balance >= 0 else "1"
         new_abs = abs(new_balance)
-        line8 = f"80{seq_nr:04d}{my_iban:<37}{new_sign}{new_abs:015.3f}".replace(".", "") + f"{datum_coda}{'':<63}"
+        line8 = f"82{seq_nr:04d}{my_iban:<37}{new_sign}{new_abs:015.3f}".replace(".", "") + f"{datum_coda}{'':<63}"
         coda_lines.append(line8.ljust(128)[:128])
 
-    # 9. TRAILER
+    # 9. TRAILER (Versie 2 = Eindigt op 2)
     str_debit = f"{total_debit:015.3f}".replace(".", "")
     str_credit = f"{total_credit:015.3f}".replace(".", "")
     line9 = f"9{'':<5}{record_count:06d}{str_debit}{str_credit}{'':<80}2"
@@ -607,18 +598,24 @@ elif app_mode == "Kassaldo Beheer":
     st.markdown("---")
     st.write(" **Virtuele IBAN (Kassa):**")
     
-    # AANGEPAST: Tekstveld om manueel te plakken (ipv label)
-    new_iban_input = st.text_input("IBAN (Kopieer exact uit Yuki)", value=curr_iban, help="Plak hier de IBAN die Yuki aan het kasboek heeft gegeven (bv. BE99...)")
-    
-    if st.button("Genereer Random IBAN (Niet aanbevolen)"):
-        new_iban_input = generate_valid_belgian_iban()
-        st.rerun()
+    col_ib1, col_ib2 = st.columns([3, 1])
+    with col_ib1:
+        if not curr_iban:
+            st.warning("Nog geen IBAN gegenereerd.")
+        else:
+            # AANGEPAST: Tekstveld om manueel te plakken
+            new_iban_input = st.text_input("IBAN (Kopieer exact uit Yuki)", value=curr_iban, help="Plak hier de IBAN die Yuki aan het kasboek heeft gegeven")
+    with col_ib2:
+        # Knop om te bewaren
+        if st.button("IBAN Opslaan"):
+            config["iban"] = new_iban_input
+            save_config(config)
+            st.rerun()
 
     if st.button("💾 Opslaan Instellingen"):
         config["start_saldo"] = new_start
         config["bic"] = new_bic
         config["coda_seq"] = new_seq
-        config["iban"] = new_iban_input # Opslaan van het tekstveld
         save_config(config)
         st.success("Opgeslagen!")
 
@@ -647,7 +644,7 @@ elif app_mode == "Export (Yuki)":
                 st.warning("Geen data.")
 
 elif app_mode == "Export Configuratie":
-    st.header("📤 Export Configuratie (CSV)")
+    st.header("📤 Export Configuratie")
     current_export_config = load_export_config()
     source_options = ["Vast", "Veld"]
     internal_fields = ["Datum", "Omschrijving", "Bedrag", "Grootboekrekening", "BtwCode", "Label"]
