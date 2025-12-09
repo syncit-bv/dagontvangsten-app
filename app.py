@@ -24,16 +24,8 @@ st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="ce
 # --- CSS STYLING ---
 st.markdown("""
     <style>
-    /* Header transparant */
-    header[data-testid="stHeader"] {
-        background-color: transparent !important;
-    }
-    
-    .block-container { 
-        padding-top: 3.5rem !important; 
-        padding-bottom: 2rem; 
-    }
-    
+    header[data-testid="stHeader"] { background-color: transparent !important; }
+    .block-container { padding-top: 3.5rem !important; padding-bottom: 2rem; }
     .info-card {
         height: 50px; display: flex; align-items: center; justify-content: center;
         border-radius: 8px; font-weight: bold; font-size: 0.95rem; margin-bottom: 10px;
@@ -42,11 +34,8 @@ st.markdown("""
     .card-red   { background-color: #fce8e6; color: #a30f0f; }
     .card-green { background-color: #e6fcf5; color: #0f5132; }
     .card-grey  { background-color: #f0f2f6; color: #31333f; }
-    .card-blue  { background-color: #e7f5ff; color: #004085; }
-    
     .day-header { text-align: center; font-size: 1.3rem; font-weight: 700; margin-bottom: 0px; color: #31333f; }
     .sub-status { text-align: center; font-size: 0.85rem; margin-bottom: 5px; }
-    
     div.stButton > button { width: 100%; }
     div[data-testid="stDateInput"] { text-align: center; }
     .streamlit-expanderHeader { background-color: #f8f9fa; border-radius: 5px; }
@@ -89,7 +78,7 @@ def save_config(config_data):
     with open(CONFIG_FILE, "w") as f: json.dump(config_data, f)
 
 def get_default_settings():
-    # AANGEPAST: GL-codes toegevoegd aan de standaard omschrijvingen
+    # Standaard instellingen met GL-codes zoals aangeraden door Scrada/Yuki best practices
     return [
         {"Code": "Omzet_21",   "Label": "Omzet 21%",       "Rekening": "700021", "ExportDesc": "Omzet 21% (&notitie&) GL-700021", "BtwCode": "V21", "Type": "Credit"},
         {"Code": "Omzet_12",   "Label": "Omzet 12%",       "Rekening": "700012", "ExportDesc": "Omzet 12% (&notitie&) GL-700012", "BtwCode": "V12", "Type": "Credit"},
@@ -235,6 +224,7 @@ def handle_save_click(datum, omschrijving, edited_df, som_omzet, som_geld, versc
     st.session_state['show_success_toast'] = True
 
 # --- EXPORT ENGINE (CSV) ---
+# HIER ZAT DE FOUT: Naam was niet aangepast, is nu hersteld
 def generate_csv_export(start_date, end_date):
     df_data = load_database()
     export_config = load_export_config()
@@ -257,11 +247,8 @@ def generate_csv_export(start_date, end_date):
             rekening = info.get('Rekening', '')
             label = info.get('Label', code_key)
             template = info.get('Template', '')
-            
-            # Variabelen vervangen met GL code logica
             final_desc = template.replace("&datum&", datum_fmt).replace("&date&", datum_fmt).replace("&label&", label).replace("&notitie&", desc_user)
             if not final_desc: final_desc = f"{label} {datum_fmt}"
-            
             transactions.append({"Rek": rekening, "Bedrag": bedrag, "Btw": btw, "Desc": final_desc, "Label": label})
 
         # ALLES POSITIEF BEHALVE AFSTORTING
@@ -288,7 +275,7 @@ def generate_csv_export(start_date, end_date):
                     if val_key == "Datum": final_val = datum_fmt
                     elif val_key == "Omschrijving": final_val = t['Desc']
                     elif val_key == "Label": final_val = t['Label']       
-                    elif val_key == "Bedrag": final_val = f"{abs(t['Bedrag']):.2f}".replace('.',',') # POSITIEF
+                    elif val_key == "Bedrag": final_val = f"{t['Bedrag']:.2f}".replace('.',',') # Teken behouden!
                     elif val_key == "Grootboekrekening": final_val = t['Rek']
                     elif val_key == "BtwCode": final_val = t['Btw']
                 export_row[col_name] = final_val
@@ -317,8 +304,6 @@ def generate_coda_export(start_date, end_date):
     total_credit = 0.0
     record_count = 0
     
-    # Ophalen van templates voor CODA (als we die willen gebruiken)
-    # Voor nu houden we CODA standaard, maar we kunnen de GL codes toevoegen in de 'Free Message' (Type 22)
     MAPPING = get_yuki_mapping()
 
     for index, row in selection.iterrows():
@@ -330,25 +315,24 @@ def generate_coda_export(start_date, end_date):
         
         transactions = []
         
-        # Omzet (Credit)
+        # Omzet (Credit = 0)
         totaal_omzet = row['Totaal_Omzet']
         if totaal_omzet > 0:
-            transactions.append({"amount": totaal_omzet, "sign": "0", "desc": f"Dagontvangsten {row['Omschrijving']}"})
+            desc = f"Dagontvangsten {row['Omschrijving']}"
+            transactions.append({"amount": totaal_omzet, "sign": "0", "desc": desc})
             total_credit += totaal_omzet
 
-        # Betalingen (Debet)
-        # We voegen hier de GL code toe aan de omschrijving indien beschikbaar voor auto-matching in CODA
+        # Betalingen (Debet = 1)
         for col, code_key in [('Geld_Bancontact', 'Bancontact'), ('Geld_Payconiq', 'Payconiq'), 
                           ('Geld_Overschrijving', 'Oversch'), ('Geld_Bonnen', 'Bonnen'),
                           ('Geld_Afstorting', 'Afstorting')]:
             val = row[col]
             if val > 0:
-                # Haal template op
+                # Ophalen Scrada-stijl template uit settings
                 info = MAPPING.get(code_key, {})
                 template = info.get('Template', '')
                 label = info.get('Label', code_key)
                 
-                # Als template GL bevat, gebruik die, anders standaard naam
                 desc_text = template.replace("&datum&", datum_dt.strftime('%d-%m-%Y')).replace("&notitie&", "")
                 if not desc_text: desc_text = label
                 
@@ -611,14 +595,24 @@ elif app_mode == "Export (Yuki)":
     col_start, col_end = st.columns(2)
     start_date = col_start.date_input("Van", datetime(datetime.now().year, datetime.now().month, 1))
     end_date = col_end.date_input("Tot", datetime.now())
-    if st.button("Genereer", type="primary"):
-        yuki_df = generate_flexible_export(start_date, end_date)
-        if yuki_df is not None:
-            st.success(f"{len(yuki_df)} regels.")
-            st.dataframe(yuki_df, hide_index=True)
-            csv = yuki_df.to_csv(sep=';', index=False).encode('utf-8-sig')
-            st.download_button("Download", csv, "export.csv", "text/csv")
-        else: st.warning("Geen data.")
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Genereer CSV (Import)", type="primary", use_container_width=True):
+            yuki_df = generate_csv_export(start_date, end_date)
+            if yuki_df is not None:
+                st.success(f"{len(yuki_df)} regels.")
+                csv = yuki_df.to_csv(sep=';', index=False).encode('utf-8-sig')
+                st.download_button("Download CSV", csv, "export.csv", "text/csv")
+            else: st.warning("Geen data.")
+    with c2:
+        if st.button("Genereer CODA (Bank)", type="secondary", use_container_width=True):
+            coda_content, filename = generate_coda_export(start_date, end_date)
+            if coda_content:
+                st.success(f"CODA gegenereerd: {filename}")
+                st.download_button("Download .COD", coda_content, filename, "text/plain")
+            else:
+                st.warning("Geen data.")
 
 elif app_mode == "Export Configuratie":
     st.header("📤 Export Configuratie")
