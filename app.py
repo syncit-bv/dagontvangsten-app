@@ -89,17 +89,18 @@ def save_config(config_data):
     with open(CONFIG_FILE, "w") as f: json.dump(config_data, f)
 
 def get_default_settings():
+    # AANGEPAST: GL-codes toegevoegd aan de standaard omschrijvingen
     return [
-        {"Code": "Omzet_21",   "Label": "Omzet 21%",       "Rekening": "700021", "ExportDesc": "Omzet 21% (&notitie&)", "BtwCode": "V21", "Type": "Credit"},
-        {"Code": "Omzet_12",   "Label": "Omzet 12%",       "Rekening": "700012", "ExportDesc": "Omzet 12% (&notitie&)", "BtwCode": "V12", "Type": "Credit"},
-        {"Code": "Omzet_6",    "Label": "Omzet 6%",        "Rekening": "700006", "ExportDesc": "Omzet 6% (&notitie&)",  "BtwCode": "V6",  "Type": "Credit"},
-        {"Code": "Omzet_0",    "Label": "Omzet 0%",        "Rekening": "700000", "ExportDesc": "Omzet 0% (&notitie&)",  "BtwCode": "V0",  "Type": "Credit"},
-        {"Code": "Cash",       "Label": "Kas (Cash)",      "Rekening": "570000", "ExportDesc": "Ontvangst Cash",        "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Bancontact", "Label": "Bancontact",      "Rekening": "580000", "ExportDesc": "Bancontact &datum&",    "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Payconiq",   "Label": "Payconiq",        "Rekening": "580000", "ExportDesc": "Payconiq &datum&",      "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Oversch",    "Label": "Overschrijving",  "Rekening": "580000", "ExportDesc": "Overschrijving &datum&","BtwCode": "",    "Type": "Debet"},
-        {"Code": "Bonnen",     "Label": "Cadeaubonnen",    "Rekening": "440000", "ExportDesc": "Cadeaubon &datum&",     "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Afstorting", "Label": "Afstorting Bank", "Rekening": "550000", "ExportDesc": "Afstorting &datum&",    "BtwCode": "",    "Type": "Credit"},
+        {"Code": "Omzet_21",   "Label": "Omzet 21%",       "Rekening": "700021", "ExportDesc": "Omzet 21% (&notitie&) GL-700021", "BtwCode": "V21", "Type": "Credit"},
+        {"Code": "Omzet_12",   "Label": "Omzet 12%",       "Rekening": "700012", "ExportDesc": "Omzet 12% (&notitie&) GL-700012", "BtwCode": "V12", "Type": "Credit"},
+        {"Code": "Omzet_6",    "Label": "Omzet 6%",        "Rekening": "700006", "ExportDesc": "Omzet 6% (&notitie&) GL-700006",  "BtwCode": "V6",  "Type": "Credit"},
+        {"Code": "Omzet_0",    "Label": "Omzet 0%",        "Rekening": "700000", "ExportDesc": "Omzet 0% (&notitie&) GL-700000",  "BtwCode": "V0",  "Type": "Credit"},
+        {"Code": "Cash",       "Label": "Kas (Cash)",      "Rekening": "570000", "ExportDesc": "Ontvangst Cash GL-570000",        "BtwCode": "",    "Type": "Debet"},
+        {"Code": "Bancontact", "Label": "Bancontact",      "Rekening": "580000", "ExportDesc": "Bancontact &datum& GL-580000",    "BtwCode": "",    "Type": "Debet"},
+        {"Code": "Payconiq",   "Label": "Payconiq",        "Rekening": "580000", "ExportDesc": "Payconiq &datum& GL-580000",      "BtwCode": "",    "Type": "Debet"},
+        {"Code": "Oversch",    "Label": "Overschrijving",  "Rekening": "580000", "ExportDesc": "Overschrijving &datum& GL-580000","BtwCode": "",    "Type": "Debet"},
+        {"Code": "Bonnen",     "Label": "Cadeaubonnen",    "Rekening": "440000", "ExportDesc": "Cadeaubon &datum& GL-440000",     "BtwCode": "",    "Type": "Debet"},
+        {"Code": "Afstorting", "Label": "Afstorting Bank", "Rekening": "550000", "ExportDesc": "Afstorting &datum& GL-550000",    "BtwCode": "",    "Type": "Credit"},
     ]
 
 def load_settings():
@@ -256,8 +257,11 @@ def generate_csv_export(start_date, end_date):
             rekening = info.get('Rekening', '')
             label = info.get('Label', code_key)
             template = info.get('Template', '')
+            
+            # Variabelen vervangen met GL code logica
             final_desc = template.replace("&datum&", datum_fmt).replace("&date&", datum_fmt).replace("&label&", label).replace("&notitie&", desc_user)
             if not final_desc: final_desc = f"{label} {datum_fmt}"
+            
             transactions.append({"Rek": rekening, "Bedrag": bedrag, "Btw": btw, "Desc": final_desc, "Label": label})
 
         # ALLES POSITIEF BEHALVE AFSTORTING
@@ -284,14 +288,14 @@ def generate_csv_export(start_date, end_date):
                     if val_key == "Datum": final_val = datum_fmt
                     elif val_key == "Omschrijving": final_val = t['Desc']
                     elif val_key == "Label": final_val = t['Label']       
-                    elif val_key == "Bedrag": final_val = f"{abs(t['Bedrag']):.2f}".replace('.',',') # POSITIEF in CSV
+                    elif val_key == "Bedrag": final_val = f"{abs(t['Bedrag']):.2f}".replace('.',',') # POSITIEF
                     elif val_key == "Grootboekrekening": final_val = t['Rek']
                     elif val_key == "BtwCode": final_val = t['Btw']
                 export_row[col_name] = final_val
             export_rows.append(export_row)
     return pd.DataFrame(export_rows)
 
-# --- CODA EXPORT ENGINE (GECORRIGEERD MET TRAILER 9 EN VERSIE CODE) ---
+# --- CODA EXPORT ENGINE ---
 def generate_coda_export(start_date, end_date):
     df_data = load_database()
     config = load_config()
@@ -309,10 +313,13 @@ def generate_coda_export(start_date, end_date):
     coda_lines = []
     seq_nr = start_seq - 1
     
-    # TELLERS VOOR RECORD 9 (TRAILER)
     total_debit = 0.0
     total_credit = 0.0
     record_count = 0
+    
+    # Ophalen van templates voor CODA (als we die willen gebruiken)
+    # Voor nu houden we CODA standaard, maar we kunnen de GL codes toevoegen in de 'Free Message' (Type 22)
+    MAPPING = get_yuki_mapping()
 
     for index, row in selection.iterrows():
         if row['Totaal_Omzet'] == 0 and row['Totaal_Geld'] == 0: continue
@@ -323,36 +330,45 @@ def generate_coda_export(start_date, end_date):
         
         transactions = []
         
-        # Omzet (Geld erbij = Credit = 0 in CODA, POSITIEF SALDO EFFECT)
+        # Omzet (Credit)
         totaal_omzet = row['Totaal_Omzet']
         if totaal_omzet > 0:
             transactions.append({"amount": totaal_omzet, "sign": "0", "desc": f"Dagontvangsten {row['Omschrijving']}"})
             total_credit += totaal_omzet
 
-        # Betalingen (Geld weg = Debet = 1 in CODA, NEGATIEF SALDO EFFECT)
-        for col, name in [('Geld_Bancontact', 'Bancontact'), ('Geld_Payconiq', 'Payconiq'), 
-                          ('Geld_Overschrijving', 'Overschrijving'), ('Geld_Bonnen', 'Bonnen'),
+        # Betalingen (Debet)
+        # We voegen hier de GL code toe aan de omschrijving indien beschikbaar voor auto-matching in CODA
+        for col, code_key in [('Geld_Bancontact', 'Bancontact'), ('Geld_Payconiq', 'Payconiq'), 
+                          ('Geld_Overschrijving', 'Oversch'), ('Geld_Bonnen', 'Bonnen'),
                           ('Geld_Afstorting', 'Afstorting')]:
             val = row[col]
             if val > 0:
-                transactions.append({"amount": val, "sign": "1", "desc": name})
+                # Haal template op
+                info = MAPPING.get(code_key, {})
+                template = info.get('Template', '')
+                label = info.get('Label', code_key)
+                
+                # Als template GL bevat, gebruik die, anders standaard naam
+                desc_text = template.replace("&datum&", datum_dt.strftime('%d-%m-%Y')).replace("&notitie&", "")
+                if not desc_text: desc_text = label
+                
+                transactions.append({"amount": val, "sign": "1", "desc": desc_text})
                 total_debit += val
 
         daily_movement = 0
         for t in transactions:
-            if t['sign'] == '0': daily_movement += t['amount'] # Credit +
-            else: daily_movement -= t['amount'] # Debet -
+            if t['sign'] == '0': daily_movement += t['amount'] 
+            else: daily_movement -= t['amount']
             
         old_balance = current_balance
         new_balance = old_balance + daily_movement
         current_balance = new_balance
 
-        # 0. HEADER (Eindigt op 2)
+        # 0. HEADER
         line0 = f"0{seq_nr:04d}{datum_coda}{my_bic:<11}{my_iban:<34}{'':<67}2"
         coda_lines.append(line0.ljust(128)[:128])
 
         # 1. OLD BALANCE
-        # 0 = Credit (Positief), 1 = Debet (Negatief).
         old_sign = "0" if old_balance >= 0 else "1"
         old_abs = abs(old_balance)
         line1 = f"10{seq_nr:04d}{my_iban:<37}{old_sign}{old_abs:015.3f}".replace(".", "") + f"{datum_coda}{'':<63}"
@@ -376,19 +392,15 @@ def generate_coda_export(start_date, end_date):
         line8 = f"80{seq_nr:04d}{my_iban:<37}{new_sign}{new_abs:015.3f}".replace(".", "") + f"{datum_coda}{'':<63}"
         coda_lines.append(line8.ljust(128)[:128])
 
-    # 9. TRAILER (De TOTALEN) (Eindigt op 2)
-    # Pos 17-31: Total Debit
-    # Pos 32-46: Total Credit
+    # 9. TRAILER
     str_debit = f"{total_debit:015.3f}".replace(".", "")
     str_credit = f"{total_credit:015.3f}".replace(".", "")
-    # Aantal records (movements 21/22/23/31...)
     line9 = f"9{'':<5}{record_count:06d}{str_debit}{str_credit}{'':<80}2"
     coda_lines.append(line9.ljust(128)[:128])
     
     config["coda_seq"] = seq_nr
     save_config(config)
     
-    # AANGEPAST: Bestandsnaam met IBAN
     clean_iban = my_iban.replace(" ", "")
     filename = f"{clean_iban}_{datetime.now().year}-{start_seq:03d}_{datetime.now().year}-{seq_nr:03d}.cod"
 
@@ -585,42 +597,12 @@ if app_mode == "Invoer":
 
 elif app_mode == "Kassaldo Beheer":
     st.header("💰 Kassaldo Beheer")
-    st.info("Stel hier het initiële startsaldo en de CODA gegevens in.")
-    
+    st.info("Stel hier het initiële startsaldo in.")
     config = load_config()
     curr_start = config.get("start_saldo", 0.0)
-    curr_iban = config.get("iban", "")
-    curr_bic = config.get("bic", "KASSBE22")
-    curr_seq = config.get("coda_seq", 0)
-    
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        new_start = st.number_input("Startsaldo (€)", value=float(curr_start), step=10.0, format="%.2f")
-    with c2:
-        new_bic = st.text_input("BIC Code", value=curr_bic)
-    with c3:
-        new_seq = st.number_input("Laatste Volgnummer", value=int(curr_seq), step=1)
-    
-    st.markdown("---")
-    st.write(" **Virtuele IBAN (Kassa):**")
-    
-    col_ib1, col_ib2 = st.columns([3, 1])
-    with col_ib1:
-        if not curr_iban:
-            st.warning("Nog geen IBAN gegenereerd.")
-        else:
-            st.code(curr_iban)
-    with col_ib2:
-        if st.button("Genereer Nieuw IBAN"):
-            new_iban = generate_valid_belgian_iban()
-            config["iban"] = new_iban
-            save_config(config)
-            st.rerun()
-
-    if st.button("💾 Opslaan Instellingen"):
+    new_start = st.number_input("Startsaldo", value=float(curr_start), step=10.0, format="%.2f")
+    if st.button("💾 Opslaan"):
         config["start_saldo"] = new_start
-        config["bic"] = new_bic
-        config["coda_seq"] = new_seq
         save_config(config)
         st.success("Opgeslagen!")
 
@@ -629,27 +611,17 @@ elif app_mode == "Export (Yuki)":
     col_start, col_end = st.columns(2)
     start_date = col_start.date_input("Van", datetime(datetime.now().year, datetime.now().month, 1))
     end_date = col_end.date_input("Tot", datetime.now())
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("Genereer CSV (Import)", type="primary", use_container_width=True):
-            yuki_df = generate_csv_export(start_date, end_date)
-            if yuki_df is not None:
-                st.success(f"{len(yuki_df)} regels.")
-                csv = yuki_df.to_csv(sep=';', index=False).encode('utf-8-sig')
-                st.download_button("Download CSV", csv, "export.csv", "text/csv")
-            else: st.warning("Geen data.")
-    with c2:
-        if st.button("Genereer CODA (Bank)", type="secondary", use_container_width=True):
-            coda_content, filename = generate_coda_export(start_date, end_date)
-            if coda_content:
-                st.success(f"CODA gegenereerd: {filename}")
-                st.download_button("Download .COD", coda_content, filename, "text/plain")
-            else:
-                st.warning("Geen data.")
+    if st.button("Genereer", type="primary"):
+        yuki_df = generate_flexible_export(start_date, end_date)
+        if yuki_df is not None:
+            st.success(f"{len(yuki_df)} regels.")
+            st.dataframe(yuki_df, hide_index=True)
+            csv = yuki_df.to_csv(sep=';', index=False).encode('utf-8-sig')
+            st.download_button("Download", csv, "export.csv", "text/csv")
+        else: st.warning("Geen data.")
 
 elif app_mode == "Export Configuratie":
-    st.header("📤 Export Configuratie (CSV)")
+    st.header("📤 Export Configuratie")
     current_export_config = load_export_config()
     source_options = ["Vast", "Veld"]
     internal_fields = ["Datum", "Omschrijving", "Bedrag", "Grootboekrekening", "BtwCode", "Label"]
