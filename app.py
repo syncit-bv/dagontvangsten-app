@@ -34,11 +34,8 @@ st.markdown("""
     .card-red   { background-color: #fce8e6; color: #a30f0f; }
     .card-green { background-color: #e6fcf5; color: #0f5132; }
     .card-grey  { background-color: #f0f2f6; color: #31333f; }
-    .day-header { text-align: center; font-size: 1.3rem; font-weight: 700; margin-bottom: 0px; color: #31333f; }
-    .sub-status { text-align: center; font-size: 0.85rem; margin-bottom: 5px; }
     div.stButton > button { width: 100%; }
     div[data-testid="stDateInput"] { text-align: center; }
-    .streamlit-expanderHeader { background-color: #f8f9fa; border-radius: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -222,7 +219,7 @@ def handle_save_click(datum, omschrijving, edited_df, som_omzet, som_geld, versc
     st.session_state.omschrijving = "" 
     st.session_state['show_success_toast'] = True
 
-# --- EXPORT ENGINE (CSV) ---
+# --- CSV EXPORT ENGINE ---
 def generate_csv_export(start_date, end_date):
     df_data = load_database()
     export_config = load_export_config()
@@ -277,18 +274,21 @@ def generate_csv_export(start_date, end_date):
             export_rows.append(export_row)
     return pd.DataFrame(export_rows)
 
-# --- CODA HELPERS ---
+# --- CODA HELPER FUNCTIES (STRICT FORMAT) ---
 def fmt_amt(val):
+    # Formaat: 000000000012500 (15 posities, geen punt)
     int_val = int(round(abs(val) * 1000))
     return f"{int_val:015d}"
 
 def fmt_n(val, length):
+    # Numeriek: Voorloopnullen (bv. 0001)
     return str(val).zfill(length)[:length]
 
 def fmt_an(val, length):
+    # Alfanumeriek: Links uitgelijnd, spaties achteraan
     return str(val).ljust(length)[:length]
 
-# --- CODA EXPORT ENGINE ---
+# --- CODA EXPORT ENGINE (GECORRIGEERD) ---
 def generate_coda_export(start_date, end_date):
     df_data = load_database()
     config = load_config()
@@ -321,11 +321,13 @@ def generate_coda_export(start_date, end_date):
         
         transactions = []
         
+        # 1. OMZET (Credit, 0)
         totaal_omzet = row['Totaal_Omzet']
         if totaal_omzet > 0:
             transactions.append({"amt": totaal_omzet, "sign": "0", "desc": f"Dagontvangsten {row['Omschrijving']}"})
             total_credit += totaal_omzet
 
+        # 2. BETALINGEN (Debet, 1)
         for col, code_key in [('Geld_Bancontact', 'Bancontact'), ('Geld_Payconiq', 'Payconiq'), 
                           ('Geld_Overschrijving', 'Oversch'), ('Geld_Bonnen', 'Bonnen'),
                           ('Geld_Afstorting', 'Afstorting')]:
@@ -350,26 +352,39 @@ def generate_coda_export(start_date, end_date):
         new_balance = old_balance + daily_movement
         current_balance = new_balance
 
-        l0 = "0" + fmt_n(seq_nr, 4) + d_coda + fmt_an(my_bic, 11) + fmt_an(my_iban, 34) + fmt_n(5, 2) + fmt_an("", 66) + "2"
+        # --- RECORD 0 (HEADER) ---
+        # Pos 1: 0
+        # Pos 2-5: 0000 (NULLEN, geen seq!)
+        # Pos 6-11: Datum
+        l0 = "0" + "0000" + d_coda + fmt_an(my_bic, 11) + fmt_an(my_iban, 34) + fmt_n(5, 2) + fmt_an("", 66) + "2"
         coda_lines.append(l0.ljust(128)[:128])
 
-        osign = "0" if old_balance >= 0 else "1"
-        l1 = "12" + fmt_n(seq_nr, 3) + fmt_an(my_iban, 31) + "EUR" + "   " + osign + fmt_amt(old_balance) + d_coda + fmt_an("", 44)
+        # --- RECORD 1 (OUD SALDO) ---
+        # Pos 1: 1
+        # Pos 2: 2 (Structuur IBAN)
+        # Pos 3-5: Volgnummer (3 cijfers)
+        old_sign = "0" if old_balance >= 0 else "1"
+        l1 = "12" + fmt_n(seq_nr, 3) + fmt_an(my_iban, 31) + "EUR" + "   " + old_sign + fmt_amt(old_balance) + d_coda + fmt_an("", 44)
         coda_lines.append(l1.ljust(128)[:128])
 
+        # --- RECORD 2 (BEWEGINGEN) ---
         for trx in transactions:
-            l21 = "21" + fmt_n(seq_nr, 4) + "0000" + fmt_an("", 21) + trx['sign'] + fmt_amt(trx['amt']) + d_coda + "10000000" + "0" + fmt_an("", 53) + d_coda + fmt_n(seq_nr, 3) + "1" + " " + "0"
+            # 21 (Basis)
+            l21 = "21" + fmt_n(seq_nr, 4) + "0000" + fmt_an("", 21) + trx['sign'] + fmt_amt(trx['amt']) + d_coda + "10000000" + "0" + fmt_an("", 53) + d_coda + fmt_n(0, 3) + "1" + " " + "0"
             coda_lines.append(l21.ljust(128)[:128])
             record_count += 1
             
+            # 22 (Omschrijving)
             l22 = "22" + fmt_n(seq_nr, 4) + "0000" + fmt_an(trx['desc'], 53) + fmt_an("", 63)
             coda_lines.append(l22.ljust(128)[:128])
             record_count += 1
 
-        nsign = "0" if new_balance >= 0 else "1"
-        l8 = "82" + fmt_n(seq_nr, 3) + fmt_an(my_iban, 31) + "EUR" + "   " + nsign + fmt_amt(new_balance) + d_coda + fmt_an("", 44)
+        # --- RECORD 8 (NIEUW SALDO) ---
+        new_sign = "0" if new_balance >= 0 else "1"
+        l8 = "82" + fmt_n(seq_nr, 3) + fmt_an(my_iban, 31) + "EUR" + "   " + new_sign + fmt_amt(new_balance) + d_coda + fmt_an("", 44)
         coda_lines.append(l8.ljust(128)[:128])
 
+    # --- RECORD 9 (TRAILER) ---
     l9 = "9" + fmt_an("", 15) + fmt_n(record_count, 6) + fmt_amt(total_debit) + fmt_amt(total_credit) + fmt_an("", 80) + "2"
     coda_lines.append(l9.ljust(128)[:128])
     
@@ -377,6 +392,7 @@ def generate_coda_export(start_date, end_date):
     save_config(config)
     
     filename = f"{my_iban.replace(' ','')}_{datetime.now().year}-{start_seq:03d}_{datetime.now().year}-{seq_nr:03d}.cod"
+
     return "\r\n".join(coda_lines), filename
 
 # --- STATE ---
@@ -388,6 +404,7 @@ def prev_day(): st.session_state.date_picker_val -= timedelta(days=1)
 def next_day(): 
     if st.session_state.date_picker_val < datetime.now().date():
         st.session_state.date_picker_val += timedelta(days=1)
+def update_date(): pass
 
 # ==========================================
 # ⚙️ SIDEBAR
@@ -587,6 +604,7 @@ elif app_mode == "Kassaldo Beheer":
     
     col_ib1, col_ib2 = st.columns([3, 1])
     with col_ib1:
+        # AANGEPAST: Tekstveld om manueel te plakken
         new_iban_input = st.text_input("IBAN (Kopieer exact uit Yuki)", value=curr_iban, help="Plak hier de IBAN die Yuki aan het kasboek heeft gegeven")
     with col_ib2:
         if st.button("IBAN Opslaan"):
