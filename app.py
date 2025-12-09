@@ -82,11 +82,11 @@ def get_default_settings():
         {"Code": "Omzet_0",    "Label": "Omzet 0%",        "Rekening": "700000", "ExportDesc": "Omzet 0% (&notitie&) GL-700000",  "BtwCode": "V0",  "Type": "Credit"},
         
         {"Code": "Cash",       "Label": "Kas (Cash)",      "Rekening": "570000", "ExportDesc": "Ontvangst Cash GL-570000",        "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Bancontact", "Label": "Bancontact",      "Rekening": "580000", "ExportDesc": "Bancontact &datum& GL-580000",    "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Payconiq",   "Label": "Payconiq",        "Rekening": "580000", "ExportDesc": "Payconiq &datum& GL-580000",      "BtwCode": "",    "Type": "Debet"},
+        {"Code": "Bancontact", "Label": "Bancontact",      "Rekening": "580000", "ExportDesc": "Bancontact &datum& GL-580000",     "BtwCode": "",    "Type": "Debet"},
+        {"Code": "Payconiq",   "Label": "Payconiq",        "Rekening": "580000", "ExportDesc": "Payconiq &datum& GL-580000",       "BtwCode": "",    "Type": "Debet"},
         {"Code": "Oversch",    "Label": "Overschrijving",  "Rekening": "580000", "ExportDesc": "Overschrijving &datum& GL-580000","BtwCode": "",    "Type": "Debet"},
-        {"Code": "Bonnen",     "Label": "Cadeaubonnen",    "Rekening": "440000", "ExportDesc": "Cadeaubon &datum& GL-440000",     "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Afstorting", "Label": "Afstorting Bank", "Rekening": "550000", "ExportDesc": "Afstorting &datum& GL-550000",    "BtwCode": "",    "Type": "Credit"},
+        {"Code": "Bonnen",     "Label": "Cadeaubonnen",    "Rekening": "440000", "ExportDesc": "Cadeaubon &datum& GL-440000",      "BtwCode": "",    "Type": "Debet"},
+        {"Code": "Afstorting", "Label": "Afstorting Bank", "Rekening": "550000", "ExportDesc": "Afstorting &datum& GL-550000",     "BtwCode": "",    "Type": "Credit"},
     ]
 
 def load_settings():
@@ -131,7 +131,7 @@ def get_default_export_config():
         {"Kolom": "Transactie code",       "Bron": "Vast", "Waarde": ""},
         {"Kolom": "Tegenrekening",         "Bron": "Veld", "Waarde": "Grootboekrekening"}, 
         {"Kolom": "Naam tegenrekening",    "Bron": "Veld", "Waarde": "Label"}, 
-        {"Kolom": "Datum transactie",      "Bron": "Veld", "Waarde": "Datum"},             
+        {"Kolom": "Datum transactie",      "Bron": "Veld", "Waarde": "Datum"},              
         {"Kolom": "Omschrijving",          "Bron": "Veld", "Waarde": "Omschrijving"},
         {"Kolom": "Bedrag",                "Bron": "Veld", "Waarde": "Bedrag"},
         {"Kolom": "Saldo kas",             "Bron": "Vast", "Waarde": ""}, 
@@ -242,10 +242,6 @@ def generate_csv_export(start_date, end_date):
             transactions.append({"Rek": rekening, "Bedrag": bedrag, "Btw": btw, "Desc": final_desc, "Label": label})
 
         # LOGICA VOOR CSV:
-        # Omzet = POSITIEF
-        # Geld ontvangst (Bancontact etc) = POSITIEF
-        # Afstorting = NEGATIEF
-        
         if row['Omzet_21'] > 0: add_trx("Omzet_21", row['Omzet_21'], "V21")
         if row['Omzet_12'] > 0: add_trx("Omzet_12", row['Omzet_12'], "V12")
         if row['Omzet_6'] > 0:  add_trx("Omzet_6",  row['Omzet_6'],  "V6")
@@ -270,12 +266,8 @@ def generate_csv_export(start_date, end_date):
                 elif source == "Veld":
                     if val_key == "Datum": final_val = datum_fmt
                     elif val_key == "Omschrijving": final_val = t['Desc']
-                    elif val_key == "Label": final_val = t['Label']       
+                    elif val_key == "Label": final_val = t['Label']        
                     elif val_key == "Bedrag": 
-                        # Forceer positief voor alles behalve afstorting als het negatief is doorgegeven in add_trx
-                        # add_trx(..., -val) -> negatief
-                        # add_trx(..., val) -> positief
-                        # We behouden het teken dat hierboven bepaald is
                         final_val = f"{t['Bedrag']:.2f}".replace('.',',')
                     elif val_key == "Grootboekrekening": final_val = t['Rek']
                     elif val_key == "BtwCode": final_val = t['Btw']
@@ -284,6 +276,7 @@ def generate_csv_export(start_date, end_date):
     return pd.DataFrame(export_rows)
 
 # --- XML EXPORT ENGINE (CAMT.053) ---
+# AANGEPASTE VERSIE: EERST SALDI BEREKENEN, DAN PAS TRANSACTIES SCHRIJVEN
 def generate_xml_export(start_date, end_date):
     df_data = load_database()
     config = load_config()
@@ -336,26 +329,16 @@ def generate_xml_export(start_date, end_date):
         acct_ccy = ET.SubElement(acct, "Ccy")
         acct_ccy.text = "EUR"
         
-        # Opening Balance
-        bal_op = ET.SubElement(stmt, "Bal")
-        tp_op = ET.SubElement(bal_op, "Tp")
-        cd_op = ET.SubElement(ET.SubElement(tp_op, "CdOrPrtry"), "Cd")
-        cd_op.text = "OPBD"
-        amt_op = ET.SubElement(bal_op, "Amt", Ccy="EUR")
-        amt_op.text = f"{abs(current_balance_val):.2f}"
-        cdt_dbt_op = ET.SubElement(bal_op, "CdtDbtInd")
-        cdt_dbt_op.text = "CRDT" if current_balance_val >= 0 else "DBIT"
-        dt_op = ET.SubElement(bal_op, "Dt")
-        dt_op_d = ET.SubElement(dt_op, "Dt")
-        dt_op_d.text = row['Datum']
+        # ------------------------------------------------------------------
+        # STAP 1: TRANSACTIE DATA VERZAMELEN & MOVEMENT BEREKENEN
+        # We schrijven nog geen Ntry naar XML, maar bouwen een lijst
+        # ------------------------------------------------------------------
         
         transactions = []
         
         # 1. Omzet (Geld erbij = Credit)
         totaal_omzet = row['Totaal_Omzet']
         if totaal_omzet > 0:
-             # Ophalen template voor Omzet (vaak Omzet_21 etc)
-             # We nemen de som, maar idealiter splitsen we. Voor nu 1 pot "Dagontvangsten"
              desc_full = f"Dagontvangsten {row['Omschrijving']}"
              transactions.append({
                 "amt": totaal_omzet, "sign": "CRDT", "desc": desc_full, 
@@ -364,8 +347,8 @@ def generate_xml_export(start_date, end_date):
 
         # 2. Uitgaven (Geld eraf = Debet)
         for col, code_key in [('Geld_Bancontact', 'Bancontact'), ('Geld_Payconiq', 'Payconiq'), 
-                          ('Geld_Overschrijving', 'Oversch'), ('Geld_Bonnen', 'Bonnen'),
-                          ('Geld_Afstorting', 'Afstorting')]:
+                              ('Geld_Overschrijving', 'Oversch'), ('Geld_Bonnen', 'Bonnen'),
+                              ('Geld_Afstorting', 'Afstorting')]:
             val = row[col]
             if val > 0:
                 info = MAPPING.get(code_key, {})
@@ -379,7 +362,48 @@ def generate_xml_export(start_date, end_date):
                     "dom": "PMNT", "fam": "ICDT", "sub": "ESCT"
                 })
         
-        daily_movement = 0
+        # Bereken de beweging van vandaag
+        daily_movement = 0.0
+        for t in transactions:
+            if t['sign'] == "CRDT": daily_movement += t['amt']
+            else: daily_movement -= t['amt']
+            
+        closing_balance_val = current_balance_val + daily_movement
+
+        # ------------------------------------------------------------------
+        # STAP 2: EERST DE SALDI SCHRIJVEN (OPENING EN SLUITING)
+        # ------------------------------------------------------------------
+
+        # Opening Balance (OPBD)
+        bal_op = ET.SubElement(stmt, "Bal")
+        tp_op = ET.SubElement(bal_op, "Tp")
+        cd_op = ET.SubElement(ET.SubElement(tp_op, "CdOrPrtry"), "Cd")
+        cd_op.text = "OPBD"
+        amt_op = ET.SubElement(bal_op, "Amt", Ccy="EUR")
+        amt_op.text = f"{abs(current_balance_val):.2f}"
+        cdt_dbt_op = ET.SubElement(bal_op, "CdtDbtInd")
+        cdt_dbt_op.text = "CRDT" if current_balance_val >= 0 else "DBIT"
+        dt_op = ET.SubElement(bal_op, "Dt")
+        dt_op_d = ET.SubElement(dt_op, "Dt")
+        dt_op_d.text = row['Datum']
+        
+        # Closing Balance (CLBD) - STAAT NU HIER!
+        bal_cl = ET.SubElement(stmt, "Bal")
+        tp_cl = ET.SubElement(bal_cl, "Tp")
+        cd_cl = ET.SubElement(ET.SubElement(tp_cl, "CdOrPrtry"), "Cd")
+        cd_cl.text = "CLBD"
+        amt_cl = ET.SubElement(bal_cl, "Amt", Ccy="EUR")
+        amt_cl.text = f"{abs(closing_balance_val):.2f}"
+        cdt_dbt_cl = ET.SubElement(bal_cl, "CdtDbtInd")
+        cdt_dbt_cl.text = "CRDT" if closing_balance_val >= 0 else "DBIT"
+        dt_cl = ET.SubElement(bal_cl, "Dt")
+        dt_cl_d = ET.SubElement(dt_cl, "Dt")
+        dt_cl_d.text = row['Datum']
+
+        # ------------------------------------------------------------------
+        # STAP 3: NU PAS DE TRANSACTIES SCHRIJVEN (Ntry)
+        # ------------------------------------------------------------------
+        
         for t in transactions:
             ntry = ET.SubElement(stmt, "Ntry")
             amt_tag = ET.SubElement(ntry, "Amt", Ccy="EUR")
@@ -391,9 +415,14 @@ def generate_xml_export(start_date, end_date):
             sts = ET.SubElement(ntry, "Sts")
             sts.text = "BOOK"
             
+            # Datums toevoegen (BookgDt EN ValDt)
             bk_dt = ET.SubElement(ntry, "BookgDt")
             dt_tag = ET.SubElement(bk_dt, "Dt")
             dt_tag.text = row['Datum']
+            
+            val_dt = ET.SubElement(ntry, "ValDt")
+            val_dt_tag = ET.SubElement(val_dt, "Dt")
+            val_dt_tag.text = row['Datum']
             
             bk_tx_cd = ET.SubElement(ntry, "BkTxCd")
             dom = ET.SubElement(bk_tx_cd, "Domn")
@@ -411,23 +440,8 @@ def generate_xml_export(start_date, end_date):
             ustrd = ET.SubElement(rmt_inf, "Ustrd")
             ustrd.text = t['desc']
             
-            if t['sign'] == "CRDT": daily_movement += t['amt']
-            else: daily_movement -= t['amt']
-            
-        current_balance_val += daily_movement
-        
-        # Closing Balance
-        bal_cl = ET.SubElement(stmt, "Bal")
-        tp_cl = ET.SubElement(bal_cl, "Tp")
-        cd_cl = ET.SubElement(ET.SubElement(tp_cl, "CdOrPrtry"), "Cd")
-        cd_cl.text = "CLBD"
-        amt_cl = ET.SubElement(bal_cl, "Amt", Ccy="EUR")
-        amt_cl.text = f"{abs(current_balance_val):.2f}"
-        cdt_dbt_cl = ET.SubElement(bal_cl, "CdtDbtInd")
-        cdt_dbt_cl.text = "CRDT" if current_balance_val >= 0 else "DBIT"
-        dt_cl = ET.SubElement(bal_cl, "Dt")
-        dt_cl_d = ET.SubElement(dt_cl, "Dt")
-        dt_cl_d.text = row['Datum']
+        # Update current balance for next day
+        current_balance_val = closing_balance_val
 
     # Update sequence
     config["coda_seq"] = coda_seq
@@ -542,15 +556,15 @@ if app_mode == "Invoer":
             def get_val(col_name): return float(existing_data.get(col_name, 0.0)) if is_overwrite_mode else 0.00
             data_items = []
             if use_0:  data_items.append({"Sectie": "1. TICKET", "Label": "🎫 0% (Vrijgesteld)", "Bedrag": get_val("Omzet_0"), "Type": "Omzet"})
-            if use_6:  data_items.append({"Sectie": "1. TICKET", "Label": "🎫 6% (Voeding)",     "Bedrag": get_val("Omzet_6"), "Type": "Omzet"})
-            if use_12: data_items.append({"Sectie": "1. TICKET", "Label": "🎫 12% (Horeca)",     "Bedrag": get_val("Omzet_12"), "Type": "Omzet"})
-            if use_21: data_items.append({"Sectie": "1. TICKET", "Label": "🎫 21% (Algemeen)",   "Bedrag": get_val("Omzet_21"), "Type": "Omzet"})
-            if use_bc:   data_items.append({"Sectie": "2. GELD", "Label": "💳 Bancontact",     "Bedrag": get_val("Geld_Bancontact"), "Type": "Geld"})
-            if use_cash: data_items.append({"Sectie": "2. GELD", "Label": "💶 Cash (Lade)",    "Bedrag": get_val("Geld_Cash"), "Type": "Geld"})
-            if use_payq: data_items.append({"Sectie": "2. GELD", "Label": "📱 Payconiq",       "Bedrag": get_val("Geld_Payconiq"), "Type": "Geld"})
+            if use_6:  data_items.append({"Sectie": "1. TICKET", "Label": "🎫 6% (Voeding)",      "Bedrag": get_val("Omzet_6"), "Type": "Omzet"})
+            if use_12: data_items.append({"Sectie": "1. TICKET", "Label": "🎫 12% (Horeca)",      "Bedrag": get_val("Omzet_12"), "Type": "Omzet"})
+            if use_21: data_items.append({"Sectie": "1. TICKET", "Label": "🎫 21% (Algemeen)",    "Bedrag": get_val("Omzet_21"), "Type": "Omzet"})
+            if use_bc:   data_items.append({"Sectie": "2. GELD", "Label": "💳 Bancontact",      "Bedrag": get_val("Geld_Bancontact"), "Type": "Geld"})
+            if use_cash: data_items.append({"Sectie": "2. GELD", "Label": "💶 Cash (Lade)",     "Bedrag": get_val("Geld_Cash"), "Type": "Geld"})
+            if use_payq: data_items.append({"Sectie": "2. GELD", "Label": "📱 Payconiq",        "Bedrag": get_val("Geld_Payconiq"), "Type": "Geld"})
             if use_over: data_items.append({"Sectie": "2. GELD", "Label": "🏦 Overschrijving", "Bedrag": get_val("Geld_Overschrijving"), "Type": "Geld"})
-            if use_vouc: data_items.append({"Sectie": "2. GELD", "Label": "🎁 Bonnen",         "Bedrag": get_val("Geld_Bonnen"), "Type": "Geld"})
-            data_items.append({"Sectie": "3. BANK", "Label": "🏦 Afstorting",    "Bedrag": get_val("Geld_Afstorting"), "Type": "Afstorting"})
+            if use_vouc: data_items.append({"Sectie": "2. GELD", "Label": "🎁 Bonnen",          "Bedrag": get_val("Geld_Bonnen"), "Type": "Geld"})
+            data_items.append({"Sectie": "3. BANK", "Label": "🏦 Afstorting",     "Bedrag": get_val("Geld_Afstorting"), "Type": "Afstorting"})
 
             df_start = pd.DataFrame(data_items)
             edited_df = st.data_editor(
