@@ -71,7 +71,7 @@ def generate_valid_belgian_iban():
 def load_config():
     default_config = {
         "start_saldo": 0.0, 
-        "iban": generate_valid_belgian_iban(), 
+        "iban": "", # Standaard leeg, gebruiker moet invullen
         "bic": "KASSBE22",
         "coda_seq": 0,
         "laatste_update": str(datetime.now().date())
@@ -336,7 +336,6 @@ def generate_coda_export(start_date, end_date):
                           ('Geld_Afstorting', 'Afstorting')]:
             val = row[col]
             if val > 0:
-                # Ophalen Scrada-stijl template uit settings
                 info = MAPPING.get(code_key, {})
                 template = info.get('Template', '')
                 label = info.get('Label', code_key)
@@ -608,23 +607,18 @@ elif app_mode == "Kassaldo Beheer":
     st.markdown("---")
     st.write(" **Virtuele IBAN (Kassa):**")
     
-    col_ib1, col_ib2 = st.columns([3, 1])
-    with col_ib1:
-        if not curr_iban:
-            st.warning("Nog geen IBAN gegenereerd.")
-        else:
-            st.code(curr_iban)
-    with col_ib2:
-        if st.button("Genereer Nieuw IBAN"):
-            new_iban = generate_valid_belgian_iban()
-            config["iban"] = new_iban
-            save_config(config)
-            st.rerun()
+    # AANGEPAST: Tekstveld om manueel te plakken (ipv label)
+    new_iban_input = st.text_input("IBAN (Kopieer exact uit Yuki)", value=curr_iban, help="Plak hier de IBAN die Yuki aan het kasboek heeft gegeven (bv. BE99...)")
+    
+    if st.button("Genereer Random IBAN (Niet aanbevolen)"):
+        new_iban_input = generate_valid_belgian_iban()
+        st.rerun()
 
     if st.button("💾 Opslaan Instellingen"):
         config["start_saldo"] = new_start
         config["bic"] = new_bic
         config["coda_seq"] = new_seq
+        config["iban"] = new_iban_input # Opslaan van het tekstveld
         save_config(config)
         st.success("Opgeslagen!")
 
@@ -653,7 +647,7 @@ elif app_mode == "Export (Yuki)":
                 st.warning("Geen data.")
 
 elif app_mode == "Export Configuratie":
-    st.header("📤 Export Configuratie")
+    st.header("📤 Export Configuratie (CSV)")
     current_export_config = load_export_config()
     source_options = ["Vast", "Veld"]
     internal_fields = ["Datum", "Omschrijving", "Bedrag", "Grootboekrekening", "BtwCode", "Label"]
