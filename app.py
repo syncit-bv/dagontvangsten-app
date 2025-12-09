@@ -8,7 +8,6 @@ import calendar
 import json
 import random
 import xml.etree.ElementTree as ET
-from xml.dom import minidom
 
 # Probeer NL instellingen
 try: locale.setlocale(locale.LC_TIME, 'nl_NL.UTF-8')
@@ -36,8 +35,6 @@ st.markdown("""
     .card-red   { background-color: #fce8e6; color: #a30f0f; }
     .card-green { background-color: #e6fcf5; color: #0f5132; }
     .card-grey  { background-color: #f0f2f6; color: #31333f; }
-    .day-header { text-align: center; font-size: 1.3rem; font-weight: 700; margin-bottom: 0px; color: #31333f; }
-    .sub-status { text-align: center; font-size: 0.85rem; margin-bottom: 5px; }
     div.stButton > button { width: 100%; }
     div[data-testid="stDateInput"] { text-align: center; }
     </style>
@@ -62,7 +59,6 @@ def load_config():
     default_config = {
         "start_saldo": 0.0, 
         "iban": "", 
-        "bic": "KASSBE22",
         "coda_seq": 0,
         "laatste_update": str(datetime.now().date())
     }
@@ -70,7 +66,6 @@ def load_config():
         with open(CONFIG_FILE, "r") as f: 
             data = json.load(f)
             if "iban" not in data: data["iban"] = default_config["iban"]
-            if "bic" not in data: data["bic"] = default_config["bic"]
             if "coda_seq" not in data: data["coda_seq"] = 0
             return data
     return default_config
@@ -79,11 +74,13 @@ def save_config(config_data):
     with open(CONFIG_FILE, "w") as f: json.dump(config_data, f)
 
 def get_default_settings():
+    # Standaard instellingen met GL-codes voor automatische matching
     return [
         {"Code": "Omzet_21",   "Label": "Omzet 21%",       "Rekening": "700021", "ExportDesc": "Omzet 21% (&notitie&) GL-700021", "BtwCode": "V21", "Type": "Credit"},
         {"Code": "Omzet_12",   "Label": "Omzet 12%",       "Rekening": "700012", "ExportDesc": "Omzet 12% (&notitie&) GL-700012", "BtwCode": "V12", "Type": "Credit"},
         {"Code": "Omzet_6",    "Label": "Omzet 6%",        "Rekening": "700006", "ExportDesc": "Omzet 6% (&notitie&) GL-700006",  "BtwCode": "V6",  "Type": "Credit"},
         {"Code": "Omzet_0",    "Label": "Omzet 0%",        "Rekening": "700000", "ExportDesc": "Omzet 0% (&notitie&) GL-700000",  "BtwCode": "V0",  "Type": "Credit"},
+        
         {"Code": "Cash",       "Label": "Kas (Cash)",      "Rekening": "570000", "ExportDesc": "Ontvangst Cash GL-570000",        "BtwCode": "",    "Type": "Debet"},
         {"Code": "Bancontact", "Label": "Bancontact",      "Rekening": "580000", "ExportDesc": "Bancontact &datum& GL-580000",    "BtwCode": "",    "Type": "Debet"},
         {"Code": "Payconiq",   "Label": "Payconiq",        "Rekening": "580000", "ExportDesc": "Payconiq &datum& GL-580000",      "BtwCode": "",    "Type": "Debet"},
@@ -126,7 +123,7 @@ def get_yuki_mapping():
         }
     return mapping
 
-# --- EXPORT CONFIG ---
+# --- EXPORT CONFIG (CSV) ---
 def get_default_export_config():
     return [
         {"Kolom": "Grootboekrekening kas", "Bron": "Vast", "Waarde": "570000"},
@@ -144,11 +141,7 @@ def get_default_export_config():
 
 def load_export_config():
     if os.path.exists(EXPORT_CONFIG_FILE):
-        df = pd.read_csv(EXPORT_CONFIG_FILE)
-        if "BTW Code" in df["Kolom"].values:
-            df = df[df["Kolom"] != "BTW Code"]
-            df.to_csv(EXPORT_CONFIG_FILE, index=False)
-        return df
+        return pd.read_csv(EXPORT_CONFIG_FILE)
     else:
         df = pd.DataFrame(get_default_export_config())
         df.to_csv(EXPORT_CONFIG_FILE, index=False)
@@ -223,7 +216,7 @@ def handle_save_click(datum, omschrijving, edited_df, som_omzet, som_geld, versc
     st.session_state.omschrijving = "" 
     st.session_state['show_success_toast'] = True
 
-# --- CSV EXPORT ENGINE ---
+# --- EXPORT ENGINE (CSV) ---
 def generate_csv_export(start_date, end_date):
     df_data = load_database()
     export_config = load_export_config()
@@ -248,15 +241,22 @@ def generate_csv_export(start_date, end_date):
             if not final_desc: final_desc = f"{label} {datum_fmt}"
             transactions.append({"Rek": rekening, "Bedrag": bedrag, "Btw": btw, "Desc": final_desc, "Label": label})
 
+        # LOGICA VOOR CSV:
+        # Omzet = POSITIEF
+        # Geld ontvangst (Bancontact etc) = POSITIEF
+        # Afstorting = NEGATIEF
+        
         if row['Omzet_21'] > 0: add_trx("Omzet_21", row['Omzet_21'], "V21")
         if row['Omzet_12'] > 0: add_trx("Omzet_12", row['Omzet_12'], "V12")
         if row['Omzet_6'] > 0:  add_trx("Omzet_6",  row['Omzet_6'],  "V6")
         if row['Omzet_0'] > 0:  add_trx("Omzet_0",  row['Omzet_0'],  "V0")
+        
         if row['Geld_Bancontact'] > 0:   add_trx("Bancontact", row['Geld_Bancontact'], "")
         if row['Geld_Payconiq'] > 0:     add_trx("Payconiq",   row['Geld_Payconiq'],   "")
         if row['Geld_Overschrijving'] > 0: add_trx("Oversch",  row['Geld_Overschrijving'], "")
         if row['Geld_Bonnen'] > 0:       add_trx("Bonnen",     row['Geld_Bonnen'],     "")
         if row['Geld_Cash'] > 0:         add_trx("Cash",       row['Geld_Cash'],       "")
+        
         if row['Geld_Afstorting'] > 0:   add_trx("Afstorting", -row['Geld_Afstorting'], "")
 
         for t in transactions:
@@ -271,7 +271,12 @@ def generate_csv_export(start_date, end_date):
                     if val_key == "Datum": final_val = datum_fmt
                     elif val_key == "Omschrijving": final_val = t['Desc']
                     elif val_key == "Label": final_val = t['Label']       
-                    elif val_key == "Bedrag": final_val = f"{abs(t['Bedrag']):.2f}".replace('.',',') if t['Bedrag'] > 0 else f"{t['Bedrag']:.2f}".replace('.',',')
+                    elif val_key == "Bedrag": 
+                        # Forceer positief voor alles behalve afstorting als het negatief is doorgegeven in add_trx
+                        # add_trx(..., -val) -> negatief
+                        # add_trx(..., val) -> positief
+                        # We behouden het teken dat hierboven bepaald is
+                        final_val = f"{t['Bedrag']:.2f}".replace('.',',')
                     elif val_key == "Grootboekrekening": final_val = t['Rek']
                     elif val_key == "BtwCode": final_val = t['Btw']
                 export_row[col_name] = final_val
@@ -287,7 +292,6 @@ def generate_xml_export(start_date, end_date):
     if selection.empty: return None, None 
     
     my_iban = config.get("iban", "").replace(" ", "")
-    my_bic = config.get("bic", "KASSBE22")
     coda_seq = int(config.get("coda_seq", 0))
     
     # XML Setup
@@ -305,10 +309,11 @@ def generate_xml_export(start_date, end_date):
     cre_dt.text = datetime.now().isoformat()
     
     # Init balances
-    current_balance_val = calculate_current_saldo(selection.iloc[0]['Datum'])
+    first_date = selection.iloc[0]['Datum']
+    current_balance_val = calculate_current_saldo(first_date)
     MAPPING = get_yuki_mapping()
     
-    # Loop days to create Statements
+    # Loop days
     for index, row in selection.iterrows():
         if row['Totaal_Omzet'] == 0 and row['Totaal_Geld'] == 0: continue
         
@@ -344,18 +349,20 @@ def generate_xml_export(start_date, end_date):
         dt_op_d = ET.SubElement(dt_op, "Dt")
         dt_op_d.text = row['Datum']
         
-        # Transactions
         transactions = []
         
-        # Omzet (Credit)
+        # 1. Omzet (Geld erbij = Credit)
         totaal_omzet = row['Totaal_Omzet']
         if totaal_omzet > 0:
-            transactions.append({
-                "amt": totaal_omzet, "sign": "CRDT", "desc": f"Dagontvangsten {row['Omschrijving']}", 
+             # Ophalen template voor Omzet (vaak Omzet_21 etc)
+             # We nemen de som, maar idealiter splitsen we. Voor nu 1 pot "Dagontvangsten"
+             desc_full = f"Dagontvangsten {row['Omschrijving']}"
+             transactions.append({
+                "amt": totaal_omzet, "sign": "CRDT", "desc": desc_full, 
                 "dom": "PMNT", "fam": "RCDT", "sub": "ESCT"
             })
-            
-        # Uitgaven (Debit)
+
+        # 2. Uitgaven (Geld eraf = Debet)
         for col, code_key in [('Geld_Bancontact', 'Bancontact'), ('Geld_Payconiq', 'Payconiq'), 
                           ('Geld_Overschrijving', 'Oversch'), ('Geld_Bonnen', 'Bonnen'),
                           ('Geld_Afstorting', 'Afstorting')]:
@@ -623,32 +630,22 @@ elif app_mode == "Kassaldo Beheer":
     config = load_config()
     curr_start = config.get("start_saldo", 0.0)
     curr_iban = config.get("iban", "")
-    curr_bic = config.get("bic", "KASSBE22")
     curr_seq = config.get("coda_seq", 0)
     
     c1, c2, c3 = st.columns(3)
     with c1:
         new_start = st.number_input("Startsaldo (€)", value=float(curr_start), step=10.0, format="%.2f")
     with c2:
-        new_bic = st.text_input("BIC Code", value=curr_bic)
+        new_iban_input = st.text_input("IBAN", value=curr_iban, help="Kopieer de IBAN van het Kasboek uit Yuki")
     with c3:
         new_seq = st.number_input("Laatste Volgnummer", value=int(curr_seq), step=1)
     
-    st.markdown("---")
-    st.write(" **Virtuele IBAN (Kassa):**")
-    
-    col_ib1, col_ib2 = st.columns([3, 1])
-    with col_ib1:
-        new_iban_input = st.text_input("IBAN (Kopieer exact uit Yuki)", value=curr_iban, help="Plak hier de IBAN die Yuki aan het kasboek heeft gegeven")
-    with col_ib2:
-        if st.button("IBAN Opslaan"):
-            config["iban"] = new_iban_input
-            save_config(config)
-            st.rerun()
+    if st.button("Genereer Random IBAN (Noodgeval)"):
+        new_iban_input = generate_valid_belgian_iban()
+        st.rerun()
 
     if st.button("💾 Opslaan Instellingen"):
         config["start_saldo"] = new_start
-        config["bic"] = new_bic
         config["coda_seq"] = new_seq
         config["iban"] = new_iban_input 
         save_config(config)
@@ -679,7 +676,7 @@ elif app_mode == "Export (Yuki)":
                 st.warning("Geen data.")
 
 elif app_mode == "Export Configuratie":
-    st.header("📤 Export Configuratie")
+    st.header("📤 Export Configuratie (CSV)")
     current_export_config = load_export_config()
     source_options = ["Vast", "Veld"]
     internal_fields = ["Datum", "Omschrijving", "Bedrag", "Grootboekrekening", "BtwCode", "Label"]
