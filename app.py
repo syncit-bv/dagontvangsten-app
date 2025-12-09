@@ -62,7 +62,7 @@ def load_config():
         "start_saldo": 0.0, 
         "iban": "", 
         "bic": "KASSBE22",
-        "coda_seq": 0, # Volgnummer van het UITTREKSEL (Statement Number)
+        "coda_seq": 0,
         "laatste_update": str(datetime.now().date())
     }
     if os.path.exists(CONFIG_FILE):
@@ -279,7 +279,6 @@ def generate_csv_export(start_date, end_date):
 
 # --- CODA HELPERS ---
 def fmt_amt(val):
-    # Formaat 15 cijfers, 3 decimalen, geen punt (bv 12.50 -> 000000000012500)
     int_val = int(round(abs(val) * 1000))
     return f"{int_val:015d}"
 
@@ -289,7 +288,7 @@ def fmt_n(val, length):
 def fmt_an(val, length):
     return str(val).ljust(length)[:length]
 
-# --- CODA EXPORT ENGINE (FIXED FEBELFIN 2.6) ---
+# --- CODA EXPORT ENGINE ---
 def generate_coda_export(start_date, end_date):
     df_data = load_database()
     config = load_config()
@@ -299,14 +298,13 @@ def generate_coda_export(start_date, end_date):
 
     my_iban = config.get("iban", "").replace(" ", "").strip()
     my_bic = config.get("bic", "KASSBE22")
-    start_seq = int(config.get("coda_seq", 0)) 
+    start_seq = int(config.get("coda_seq", 0)) + 1
     
-    # Startsaldo bepalen
     first_day_in_selection = selection.iloc[0]['Datum']
     current_balance = calculate_current_saldo(first_day_in_selection)
     
     coda_lines = []
-    seq_nr = start_seq # We tellen op per dag
+    seq_nr = start_seq - 1
     
     total_debit = 0.0
     total_credit = 0.0
@@ -323,13 +321,11 @@ def generate_coda_export(start_date, end_date):
         
         transactions = []
         
-        # 1. OMZET (Credit, 0)
         totaal_omzet = row['Totaal_Omzet']
         if totaal_omzet > 0:
             transactions.append({"amt": totaal_omzet, "sign": "0", "desc": f"Dagontvangsten {row['Omschrijving']}"})
             total_credit += totaal_omzet
 
-        # 2. BETALINGEN (Debet, 1)
         for col, code_key in [('Geld_Bancontact', 'Bancontact'), ('Geld_Payconiq', 'Payconiq'), 
                           ('Geld_Overschrijving', 'Oversch'), ('Geld_Bonnen', 'Bonnen'),
                           ('Geld_Afstorting', 'Afstorting')]:
@@ -338,6 +334,7 @@ def generate_coda_export(start_date, end_date):
                 info = MAPPING.get(code_key, {})
                 template = info.get('Template', '')
                 label = info.get('Label', code_key)
+                
                 desc_text = template.replace("&datum&", datum_dt.strftime('%d-%m-%Y')).replace("&notitie&", "")
                 if not desc_text: desc_text = label
                 
@@ -353,47 +350,33 @@ def generate_coda_export(start_date, end_date):
         new_balance = old_balance + daily_movement
         current_balance = new_balance
 
-        # --- RECORD 0 (HEADER) ---
         l0 = "0" + fmt_n(seq_nr, 4) + d_coda + fmt_an(my_bic, 11) + fmt_an(my_iban, 34) + fmt_n(5, 2) + fmt_an("", 66) + "2"
         coda_lines.append(l0.ljust(128)[:128])
 
-        # --- RECORD 1 (OUD SALDO) ---
-        # 1(Type) + 2(Struct) + 3(Seq) + 37(Rek) + 1(Sign) + 15(Amt) + 6(Date)
-        # Rekening = IBAN(31) + 'EUR' + 3 spaties
-        old_sign = "0" if old_balance >= 0 else "1"
-        l1 = "12" + fmt_n(seq_nr, 3) + fmt_an(my_iban, 31) + "EUR" + "   " + old_sign + fmt_amt(old_balance) + d_coda + fmt_an("", 44)
+        osign = "0" if old_balance >= 0 else "1"
+        l1 = "12" + fmt_n(seq_nr, 3) + fmt_an(my_iban, 31) + "EUR" + "   " + osign + fmt_amt(old_balance) + d_coda + fmt_an("", 44)
         coda_lines.append(l1.ljust(128)[:128])
 
-        # --- RECORD 2 (BEWEGINGEN) ---
         for trx in transactions:
-            # Rec 21
-            # 21(2) + 4(Seq) + 4(Det) + 21(Ref) + 1(Sign) + 15(Amt) + 6(Date) + ...
-            # Ref laten we leeg of 0
-            # Pos 126 (Link) = 1 want 22 volgt
             l21 = "21" + fmt_n(seq_nr, 4) + "0000" + fmt_an("", 21) + trx['sign'] + fmt_amt(trx['amt']) + d_coda + "10000000" + "0" + fmt_an("", 53) + d_coda + fmt_n(seq_nr, 3) + "1" + " " + "0"
             coda_lines.append(l21.ljust(128)[:128])
             record_count += 1
             
-            # Rec 22 (Mededeling)
             l22 = "22" + fmt_n(seq_nr, 4) + "0000" + fmt_an(trx['desc'], 53) + fmt_an("", 63)
             coda_lines.append(l22.ljust(128)[:128])
             record_count += 1
-        
-        # --- RECORD 8 (NIEUW SALDO) ---
-        new_sign = "0" if new_balance >= 0 else "1"
-        l8 = "82" + fmt_n(seq_nr, 3) + fmt_an(my_iban, 31) + "EUR" + "   " + new_sign + fmt_amt(new_balance) + d_coda + fmt_an("", 44)
+
+        nsign = "0" if new_balance >= 0 else "1"
+        l8 = "82" + fmt_n(seq_nr, 3) + fmt_an(my_iban, 31) + "EUR" + "   " + nsign + fmt_amt(new_balance) + d_coda + fmt_an("", 44)
         coda_lines.append(l8.ljust(128)[:128])
 
-    # --- RECORD 9 (TRAILER) ---
     l9 = "9" + fmt_an("", 15) + fmt_n(record_count, 6) + fmt_amt(total_debit) + fmt_amt(total_credit) + fmt_an("", 80) + "2"
     coda_lines.append(l9.ljust(128)[:128])
     
-    # Save sequence
     config["coda_seq"] = seq_nr
     save_config(config)
     
     filename = f"{my_iban.replace(' ','')}_{datetime.now().year}-{start_seq:03d}_{datetime.now().year}-{seq_nr:03d}.cod"
-
     return "\r\n".join(coda_lines), filename
 
 # --- STATE ---
@@ -405,7 +388,6 @@ def prev_day(): st.session_state.date_picker_val -= timedelta(days=1)
 def next_day(): 
     if st.session_state.date_picker_val < datetime.now().date():
         st.session_state.date_picker_val += timedelta(days=1)
-def update_date(): pass
 
 # ==========================================
 # ⚙️ SIDEBAR
@@ -419,9 +401,6 @@ with st.sidebar:
     if is_admin:
         st.success("🔓 Admin")
         app_mode = st.radio("Ga naar:", ["Invoer", "Export (Yuki)", "Instellingen", "Export Configuratie", "Kassaldo Beheer"])
-        st.divider()
-        if os.path.exists(DATA_FILE):
-             with open(DATA_FILE, "rb") as f: st.download_button("📥 Backup", f, "backup.csv", "text/csv")
     st.divider()
     if app_mode == "Invoer":
         st.subheader("Profiel")
@@ -608,10 +587,8 @@ elif app_mode == "Kassaldo Beheer":
     
     col_ib1, col_ib2 = st.columns([3, 1])
     with col_ib1:
-        # AANGEPAST: Tekstveld om manueel te plakken
         new_iban_input = st.text_input("IBAN (Kopieer exact uit Yuki)", value=curr_iban, help="Plak hier de IBAN die Yuki aan het kasboek heeft gegeven")
     with col_ib2:
-        # Knop om te bewaren
         if st.button("IBAN Opslaan"):
             config["iban"] = new_iban_input
             save_config(config)
@@ -621,7 +598,7 @@ elif app_mode == "Kassaldo Beheer":
         config["start_saldo"] = new_start
         config["bic"] = new_bic
         config["coda_seq"] = new_seq
-        config["iban"] = new_iban_input # Opslaan van het tekstveld
+        config["iban"] = new_iban_input 
         save_config(config)
         st.success("Opgeslagen!")
 
@@ -645,7 +622,7 @@ elif app_mode == "Export (Yuki)":
             coda_content, filename = generate_coda_export(start_date, end_date)
             if coda_content:
                 st.success(f"CODA gegenereerd: {filename}")
-                st.download_button("Download .COD", coda_content, filename, "text/plain")
+                st.download_button("Download .COD", coda_content.encode('latin-1'), filename, "text/plain")
             else:
                 st.warning("Geen data.")
 
