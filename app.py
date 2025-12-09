@@ -7,6 +7,8 @@ import locale
 import calendar
 import json
 import random
+import xml.etree.ElementTree as ET
+from xml.dom import minidom
 
 # Probeer NL instellingen
 try: locale.setlocale(locale.LC_TIME, 'nl_NL.UTF-8')
@@ -34,6 +36,8 @@ st.markdown("""
     .card-red   { background-color: #fce8e6; color: #a30f0f; }
     .card-green { background-color: #e6fcf5; color: #0f5132; }
     .card-grey  { background-color: #f0f2f6; color: #31333f; }
+    .day-header { text-align: center; font-size: 1.3rem; font-weight: 700; margin-bottom: 0px; color: #31333f; }
+    .sub-status { text-align: center; font-size: 0.85rem; margin-bottom: 5px; }
     div.stButton > button { width: 100%; }
     div[data-testid="stDateInput"] { text-align: center; }
     </style>
@@ -274,60 +278,84 @@ def generate_csv_export(start_date, end_date):
             export_rows.append(export_row)
     return pd.DataFrame(export_rows)
 
-# --- CODA HELPER FUNCTIES (STRICT FORMAT) ---
-def fmt_amt(val):
-    # Formaat: 000000000012500 (15 posities, geen punt)
-    int_val = int(round(abs(val) * 1000))
-    return f"{int_val:015d}"
-
-def fmt_n(val, length):
-    # Numeriek: Voorloopnullen (bv. 0001)
-    return str(val).zfill(length)[:length]
-
-def fmt_an(val, length):
-    # Alfanumeriek: Links uitgelijnd, spaties achteraan
-    return str(val).ljust(length)[:length]
-
-# --- CODA EXPORT ENGINE (GECORRIGEERD) ---
-def generate_coda_export(start_date, end_date):
+# --- XML EXPORT ENGINE (CAMT.053) ---
+def generate_xml_export(start_date, end_date):
     df_data = load_database()
     config = load_config()
     mask = (df_data['Datum'] >= str(start_date)) & (df_data['Datum'] <= str(end_date))
     selection = df_data.loc[mask].sort_values(by="Datum", ascending=True)
     if selection.empty: return None, None 
-
-    my_iban = config.get("iban", "").replace(" ", "").strip()
+    
+    my_iban = config.get("iban", "").replace(" ", "")
     my_bic = config.get("bic", "KASSBE22")
-    start_seq = int(config.get("coda_seq", 0)) + 1
+    coda_seq = int(config.get("coda_seq", 0))
     
-    first_day_in_selection = selection.iloc[0]['Datum']
-    current_balance = calculate_current_saldo(first_day_in_selection)
+    # XML Setup
+    NS = "urn:iso:std:iso:20022:tech:xsd:camt.053.001.02"
+    ET.register_namespace("", NS)
+    root = ET.Element(f"{{{NS}}}Document")
     
-    coda_lines = []
-    seq_nr = start_seq - 1
+    bk_stmt = ET.SubElement(root, "BkToCstmrStmt")
     
-    total_debit = 0.0
-    total_credit = 0.0
-    record_count = 0
+    # Group Header
+    grphdr = ET.SubElement(bk_stmt, "GrpHdr")
+    msg_id = ET.SubElement(grphdr, "MsgId")
+    msg_id.text = f"KASSA-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    cre_dt = ET.SubElement(grphdr, "CreDtTm")
+    cre_dt.text = datetime.now().isoformat()
     
+    # Init balances
+    current_balance_val = calculate_current_saldo(selection.iloc[0]['Datum'])
     MAPPING = get_yuki_mapping()
-
+    
+    # Loop days to create Statements
     for index, row in selection.iterrows():
         if row['Totaal_Omzet'] == 0 and row['Totaal_Geld'] == 0: continue
         
-        seq_nr += 1
-        datum_dt = pd.to_datetime(row['Datum'])
-        d_coda = datum_dt.strftime("%d%m%y") 
+        coda_seq += 1
+        stmt = ET.SubElement(bk_stmt, "Stmt")
         
+        # ID & Seq
+        stmt_id = ET.SubElement(stmt, "Id")
+        stmt_id.text = f"{datetime.now().year}-{coda_seq}"
+        el_seq = ET.SubElement(stmt, "ElctrncSeqNb")
+        el_seq.text = str(coda_seq)
+        cre_dt_stmt = ET.SubElement(stmt, "CreDtTm")
+        cre_dt_stmt.text = datetime.now().isoformat()
+        
+        # Account
+        acct = ET.SubElement(stmt, "Acct")
+        acct_id = ET.SubElement(acct, "Id")
+        acct_iban = ET.SubElement(acct_id, "IBAN")
+        acct_iban.text = my_iban
+        acct_ccy = ET.SubElement(acct, "Ccy")
+        acct_ccy.text = "EUR"
+        
+        # Opening Balance
+        bal_op = ET.SubElement(stmt, "Bal")
+        tp_op = ET.SubElement(bal_op, "Tp")
+        cd_op = ET.SubElement(ET.SubElement(tp_op, "CdOrPrtry"), "Cd")
+        cd_op.text = "OPBD"
+        amt_op = ET.SubElement(bal_op, "Amt", Ccy="EUR")
+        amt_op.text = f"{abs(current_balance_val):.2f}"
+        cdt_dbt_op = ET.SubElement(bal_op, "CdtDbtInd")
+        cdt_dbt_op.text = "CRDT" if current_balance_val >= 0 else "DBIT"
+        dt_op = ET.SubElement(bal_op, "Dt")
+        dt_op_d = ET.SubElement(dt_op, "Dt")
+        dt_op_d.text = row['Datum']
+        
+        # Transactions
         transactions = []
         
-        # 1. OMZET (Credit, 0)
+        # Omzet (Credit)
         totaal_omzet = row['Totaal_Omzet']
         if totaal_omzet > 0:
-            transactions.append({"amt": totaal_omzet, "sign": "0", "desc": f"Dagontvangsten {row['Omschrijving']}"})
-            total_credit += totaal_omzet
-
-        # 2. BETALINGEN (Debet, 1)
+            transactions.append({
+                "amt": totaal_omzet, "sign": "CRDT", "desc": f"Dagontvangsten {row['Omschrijving']}", 
+                "dom": "PMNT", "fam": "RCDT", "sub": "ESCT"
+            })
+            
+        # Uitgaven (Debit)
         for col, code_key in [('Geld_Bancontact', 'Bancontact'), ('Geld_Payconiq', 'Payconiq'), 
                           ('Geld_Overschrijving', 'Oversch'), ('Geld_Bonnen', 'Bonnen'),
                           ('Geld_Afstorting', 'Afstorting')]:
@@ -336,64 +364,71 @@ def generate_coda_export(start_date, end_date):
                 info = MAPPING.get(code_key, {})
                 template = info.get('Template', '')
                 label = info.get('Label', code_key)
-                
-                desc_text = template.replace("&datum&", datum_dt.strftime('%d-%m-%Y')).replace("&notitie&", "")
+                desc_text = template.replace("&datum&", row['Datum']).replace("&notitie&", "")
                 if not desc_text: desc_text = label
                 
-                transactions.append({"amt": val, "sign": "1", "desc": desc_text})
-                total_debit += val
-
+                transactions.append({
+                    "amt": val, "sign": "DBIT", "desc": desc_text,
+                    "dom": "PMNT", "fam": "ICDT", "sub": "ESCT"
+                })
+        
         daily_movement = 0
         for t in transactions:
-            if t['sign'] == '0': daily_movement += t['amt']
+            ntry = ET.SubElement(stmt, "Ntry")
+            amt_tag = ET.SubElement(ntry, "Amt", Ccy="EUR")
+            amt_tag.text = f"{t['amt']:.2f}"
+            
+            cdt_dbt = ET.SubElement(ntry, "CdtDbtInd")
+            cdt_dbt.text = t['sign']
+            
+            sts = ET.SubElement(ntry, "Sts")
+            sts.text = "BOOK"
+            
+            bk_dt = ET.SubElement(ntry, "BookgDt")
+            dt_tag = ET.SubElement(bk_dt, "Dt")
+            dt_tag.text = row['Datum']
+            
+            bk_tx_cd = ET.SubElement(ntry, "BkTxCd")
+            dom = ET.SubElement(bk_tx_cd, "Domn")
+            cd_dom = ET.SubElement(dom, "Cd")
+            cd_dom.text = t['dom']
+            fam = ET.SubElement(dom, "Fmly")
+            cd_fam = ET.SubElement(fam, "Cd")
+            cd_fam.text = t['fam']
+            sub_fam = ET.SubElement(fam, "SubFmlyCd")
+            sub_fam.text = t['sub']
+            
+            ntry_dtls = ET.SubElement(ntry, "NtryDtls")
+            tx_dtls = ET.SubElement(ntry_dtls, "TxDtls")
+            rmt_inf = ET.SubElement(tx_dtls, "RmtInf")
+            ustrd = ET.SubElement(rmt_inf, "Ustrd")
+            ustrd.text = t['desc']
+            
+            if t['sign'] == "CRDT": daily_movement += t['amt']
             else: daily_movement -= t['amt']
             
-        old_balance = current_balance
-        new_balance = old_balance + daily_movement
-        current_balance = new_balance
+        current_balance_val += daily_movement
+        
+        # Closing Balance
+        bal_cl = ET.SubElement(stmt, "Bal")
+        tp_cl = ET.SubElement(bal_cl, "Tp")
+        cd_cl = ET.SubElement(ET.SubElement(tp_cl, "CdOrPrtry"), "Cd")
+        cd_cl.text = "CLBD"
+        amt_cl = ET.SubElement(bal_cl, "Amt", Ccy="EUR")
+        amt_cl.text = f"{abs(current_balance_val):.2f}"
+        cdt_dbt_cl = ET.SubElement(bal_cl, "CdtDbtInd")
+        cdt_dbt_cl.text = "CRDT" if current_balance_val >= 0 else "DBIT"
+        dt_cl = ET.SubElement(bal_cl, "Dt")
+        dt_cl_d = ET.SubElement(dt_cl, "Dt")
+        dt_cl_d.text = row['Datum']
 
-        # --- RECORD 0 (HEADER) ---
-        # Pos 1: 0
-        # Pos 2-5: 0000 (NULLEN, geen seq!)
-        # Pos 6-11: Datum
-        l0 = "0" + "0000" + d_coda + fmt_an(my_bic, 11) + fmt_an(my_iban, 34) + fmt_n(5, 2) + fmt_an("", 66) + "2"
-        coda_lines.append(l0.ljust(128)[:128])
-
-        # --- RECORD 1 (OUD SALDO) ---
-        # Pos 1: 1
-        # Pos 2: 2 (Structuur IBAN)
-        # Pos 3-5: Volgnummer (3 cijfers)
-        old_sign = "0" if old_balance >= 0 else "1"
-        l1 = "12" + fmt_n(seq_nr, 3) + fmt_an(my_iban, 31) + "EUR" + "   " + old_sign + fmt_amt(old_balance) + d_coda + fmt_an("", 44)
-        coda_lines.append(l1.ljust(128)[:128])
-
-        # --- RECORD 2 (BEWEGINGEN) ---
-        for trx in transactions:
-            # 21 (Basis)
-            l21 = "21" + fmt_n(seq_nr, 4) + "0000" + fmt_an("", 21) + trx['sign'] + fmt_amt(trx['amt']) + d_coda + "10000000" + "0" + fmt_an("", 53) + d_coda + fmt_n(0, 3) + "1" + " " + "0"
-            coda_lines.append(l21.ljust(128)[:128])
-            record_count += 1
-            
-            # 22 (Omschrijving)
-            l22 = "22" + fmt_n(seq_nr, 4) + "0000" + fmt_an(trx['desc'], 53) + fmt_an("", 63)
-            coda_lines.append(l22.ljust(128)[:128])
-            record_count += 1
-
-        # --- RECORD 8 (NIEUW SALDO) ---
-        new_sign = "0" if new_balance >= 0 else "1"
-        l8 = "82" + fmt_n(seq_nr, 3) + fmt_an(my_iban, 31) + "EUR" + "   " + new_sign + fmt_amt(new_balance) + d_coda + fmt_an("", 44)
-        coda_lines.append(l8.ljust(128)[:128])
-
-    # --- RECORD 9 (TRAILER) ---
-    l9 = "9" + fmt_an("", 15) + fmt_n(record_count, 6) + fmt_amt(total_debit) + fmt_amt(total_credit) + fmt_an("", 80) + "2"
-    coda_lines.append(l9.ljust(128)[:128])
-    
-    config["coda_seq"] = seq_nr
+    # Update sequence
+    config["coda_seq"] = coda_seq
     save_config(config)
     
-    filename = f"{my_iban.replace(' ','')}_{datetime.now().year}-{start_seq:03d}_{datetime.now().year}-{seq_nr:03d}.cod"
-
-    return "\r\n".join(coda_lines), filename
+    xml_str = ET.tostring(root, encoding='utf-8', method='xml')
+    filename = f"CAMT053_{my_iban}_{datetime.now().strftime('%Y%m%d')}.xml"
+    return xml_str, filename
 
 # --- STATE ---
 if 'reset_count' not in st.session_state: st.session_state.reset_count = 0
@@ -604,7 +639,6 @@ elif app_mode == "Kassaldo Beheer":
     
     col_ib1, col_ib2 = st.columns([3, 1])
     with col_ib1:
-        # AANGEPAST: Tekstveld om manueel te plakken
         new_iban_input = st.text_input("IBAN (Kopieer exact uit Yuki)", value=curr_iban, help="Plak hier de IBAN die Yuki aan het kasboek heeft gegeven")
     with col_ib2:
         if st.button("IBAN Opslaan"):
@@ -636,11 +670,11 @@ elif app_mode == "Export (Yuki)":
                 st.download_button("Download CSV", csv, "export.csv", "text/csv")
             else: st.warning("Geen data.")
     with c2:
-        if st.button("Genereer CODA (Bank)", type="secondary", use_container_width=True):
-            coda_content, filename = generate_coda_export(start_date, end_date)
-            if coda_content:
-                st.success(f"CODA gegenereerd: {filename}")
-                st.download_button("Download .COD", coda_content.encode('latin-1'), filename, "text/plain")
+        if st.button("Genereer XML (camt.053)", type="secondary", use_container_width=True):
+            xml_content, filename = generate_xml_export(start_date, end_date)
+            if xml_content:
+                st.success(f"XML gegenereerd: {filename}")
+                st.download_button("Download .xml", xml_content, filename, "text/xml")
             else:
                 st.warning("Geen data.")
 
