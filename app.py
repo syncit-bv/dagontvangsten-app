@@ -24,8 +24,16 @@ st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="ce
 # --- CSS STYLING ---
 st.markdown("""
     <style>
-    header[data-testid="stHeader"] { background-color: transparent !important; }
-    .block-container { padding-top: 3.5rem !important; padding-bottom: 2rem; }
+    /* Header transparant */
+    header[data-testid="stHeader"] {
+        background-color: transparent !important;
+    }
+    
+    .block-container { 
+        padding-top: 3.5rem !important; 
+        padding-bottom: 2rem; 
+    }
+    
     .info-card {
         height: 50px; display: flex; align-items: center; justify-content: center;
         border-radius: 8px; font-weight: bold; font-size: 0.95rem; margin-bottom: 10px;
@@ -34,8 +42,11 @@ st.markdown("""
     .card-red   { background-color: #fce8e6; color: #a30f0f; }
     .card-green { background-color: #e6fcf5; color: #0f5132; }
     .card-grey  { background-color: #f0f2f6; color: #31333f; }
+    .card-blue  { background-color: #e7f5ff; color: #004085; }
+    
     .day-header { text-align: center; font-size: 1.3rem; font-weight: 700; margin-bottom: 0px; color: #31333f; }
     .sub-status { text-align: center; font-size: 0.85rem; margin-bottom: 5px; }
+    
     div.stButton > button { width: 100%; }
     div[data-testid="stDateInput"] { text-align: center; }
     .streamlit-expanderHeader { background-color: #f8f9fa; border-radius: 5px; }
@@ -78,7 +89,6 @@ def save_config(config_data):
     with open(CONFIG_FILE, "w") as f: json.dump(config_data, f)
 
 def get_default_settings():
-    # Standaard instellingen met GL-codes zoals aangeraden door Scrada/Yuki best practices
     return [
         {"Code": "Omzet_21",   "Label": "Omzet 21%",       "Rekening": "700021", "ExportDesc": "Omzet 21% (&notitie&) GL-700021", "BtwCode": "V21", "Type": "Credit"},
         {"Code": "Omzet_12",   "Label": "Omzet 12%",       "Rekening": "700012", "ExportDesc": "Omzet 12% (&notitie&) GL-700012", "BtwCode": "V12", "Type": "Credit"},
@@ -224,7 +234,6 @@ def handle_save_click(datum, omschrijving, edited_df, som_omzet, som_geld, versc
     st.session_state['show_success_toast'] = True
 
 # --- EXPORT ENGINE (CSV) ---
-# HIER ZAT DE FOUT: Naam was niet aangepast, is nu hersteld
 def generate_csv_export(start_date, end_date):
     df_data = load_database()
     export_config = load_export_config()
@@ -275,7 +284,7 @@ def generate_csv_export(start_date, end_date):
                     if val_key == "Datum": final_val = datum_fmt
                     elif val_key == "Omschrijving": final_val = t['Desc']
                     elif val_key == "Label": final_val = t['Label']       
-                    elif val_key == "Bedrag": final_val = f"{t['Bedrag']:.2f}".replace('.',',') # Teken behouden!
+                    elif val_key == "Bedrag": final_val = f"{abs(t['Bedrag']):.2f}".replace('.',',') # POSITIEF in CSV
                     elif val_key == "Grootboekrekening": final_val = t['Rek']
                     elif val_key == "BtwCode": final_val = t['Btw']
                 export_row[col_name] = final_val
@@ -318,8 +327,7 @@ def generate_coda_export(start_date, end_date):
         # Omzet (Credit = 0)
         totaal_omzet = row['Totaal_Omzet']
         if totaal_omzet > 0:
-            desc = f"Dagontvangsten {row['Omschrijving']}"
-            transactions.append({"amount": totaal_omzet, "sign": "0", "desc": desc})
+            transactions.append({"amount": totaal_omzet, "sign": "0", "desc": f"Dagontvangsten {row['Omschrijving']}"})
             total_credit += totaal_omzet
 
         # Betalingen (Debet = 1)
@@ -581,12 +589,42 @@ if app_mode == "Invoer":
 
 elif app_mode == "Kassaldo Beheer":
     st.header("💰 Kassaldo Beheer")
-    st.info("Stel hier het initiële startsaldo in.")
+    st.info("Stel hier het initiële startsaldo en de CODA gegevens in.")
+    
     config = load_config()
     curr_start = config.get("start_saldo", 0.0)
-    new_start = st.number_input("Startsaldo", value=float(curr_start), step=10.0, format="%.2f")
-    if st.button("💾 Opslaan"):
+    curr_iban = config.get("iban", "")
+    curr_bic = config.get("bic", "KASSBE22")
+    curr_seq = config.get("coda_seq", 0)
+    
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        new_start = st.number_input("Startsaldo (€)", value=float(curr_start), step=10.0, format="%.2f")
+    with c2:
+        new_bic = st.text_input("BIC Code", value=curr_bic)
+    with c3:
+        new_seq = st.number_input("Laatste Volgnummer", value=int(curr_seq), step=1)
+    
+    st.markdown("---")
+    st.write(" **Virtuele IBAN (Kassa):**")
+    
+    col_ib1, col_ib2 = st.columns([3, 1])
+    with col_ib1:
+        if not curr_iban:
+            st.warning("Nog geen IBAN gegenereerd.")
+        else:
+            st.code(curr_iban)
+    with col_ib2:
+        if st.button("Genereer Nieuw IBAN"):
+            new_iban = generate_valid_belgian_iban()
+            config["iban"] = new_iban
+            save_config(config)
+            st.rerun()
+
+    if st.button("💾 Opslaan Instellingen"):
         config["start_saldo"] = new_start
+        config["bic"] = new_bic
+        config["coda_seq"] = new_seq
         save_config(config)
         st.success("Opgeslagen!")
 
