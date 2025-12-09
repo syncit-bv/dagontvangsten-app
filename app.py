@@ -24,18 +24,18 @@ st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="ce
 # --- CSS STYLING ---
 st.markdown("""
     <style>
-    /* Header transparant (Menu blijft zichtbaar) */
+    /* 1. Header Transparant */
     header[data-testid="stHeader"] {
         background-color: transparent !important;
     }
     
-    /* Inhoud omhoog trekken */
+    /* 2. Inhoud naar beneden duwen */
     .block-container { 
         padding-top: 3.5rem !important; 
         padding-bottom: 2rem; 
     }
     
-    /* Info Kaarten */
+    /* 3. Info Kaarten */
     .info-card {
         height: 50px; display: flex; align-items: center; justify-content: center;
         border-radius: 8px; font-weight: bold; font-size: 0.95rem; margin-bottom: 10px;
@@ -75,7 +75,7 @@ def load_config():
         "start_saldo": 0.0, 
         "iban": generate_valid_belgian_iban(), 
         "bic": "KASSBE22",
-        "coda_seq": 0, # Volgnummer voor CODA
+        "coda_seq": 0,
         "laatste_update": str(datetime.now().date())
     }
     if os.path.exists(CONFIG_FILE):
@@ -235,7 +235,7 @@ def handle_save_click(datum, omschrijving, edited_df, som_omzet, som_geld, versc
     st.session_state.omschrijving = "" 
     st.session_state['show_success_toast'] = True
 
-# --- EXPORT ENGINE (CSV: ALLES POSITIEF + AFSTORTING NEGATIEF) ---
+# --- EXPORT ENGINE (CSV) ---
 def generate_csv_export(start_date, end_date):
     df_data = load_database()
     export_config = load_export_config()
@@ -262,11 +262,11 @@ def generate_csv_export(start_date, end_date):
             if not final_desc: final_desc = f"{label} {datum_fmt}"
             transactions.append({"Rek": rekening, "Bedrag": bedrag, "Btw": btw, "Desc": final_desc, "Label": label})
 
-        # ALLES POSITIEF BEHALVE AFSTORTING
         if row['Omzet_21'] > 0: add_trx("Omzet_21", row['Omzet_21'], "V21")
         if row['Omzet_12'] > 0: add_trx("Omzet_12", row['Omzet_12'], "V12")
         if row['Omzet_6'] > 0:  add_trx("Omzet_6",  row['Omzet_6'],  "V6")
         if row['Omzet_0'] > 0:  add_trx("Omzet_0",  row['Omzet_0'],  "V0")
+        
         if row['Geld_Bancontact'] > 0:   add_trx("Bancontact", row['Geld_Bancontact'], "")
         if row['Geld_Payconiq'] > 0:     add_trx("Payconiq",   row['Geld_Payconiq'],   "")
         if row['Geld_Overschrijving'] > 0: add_trx("Oversch",  row['Geld_Overschrijving'], "")
@@ -286,21 +286,20 @@ def generate_csv_export(start_date, end_date):
                     if val_key == "Datum": final_val = datum_fmt
                     elif val_key == "Omschrijving": final_val = t['Desc']
                     elif val_key == "Label": final_val = t['Label']       
-                    elif val_key == "Bedrag": 
-                        final_val = f"{t['Bedrag']:.2f}".replace('.',',') # Teken behouden (Alles pos, behalve afstorting)
+                    elif val_key == "Bedrag": final_val = f"{abs(t['Bedrag']):.2f}".replace('.',',') # POSITIEF in CSV
                     elif val_key == "Grootboekrekening": final_val = t['Rek']
                     elif val_key == "BtwCode": final_val = t['Btw']
                 export_row[col_name] = final_val
             export_rows.append(export_row)
     return pd.DataFrame(export_rows)
 
-# --- CODA EXPORT ENGINE (GECORRIGEERD 128 CHARS) ---
+# --- CODA EXPORT ENGINE (GECORRIGEERD MET TRAILER 9) ---
 def generate_coda_export(start_date, end_date):
     df_data = load_database()
     config = load_config()
     mask = (df_data['Datum'] >= str(start_date)) & (df_data['Datum'] <= str(end_date))
     selection = df_data.loc[mask].sort_values(by="Datum", ascending=True)
-    if selection.empty: return None, None # Return filename also
+    if selection.empty: return None, None 
 
     my_iban = config.get("iban", "").replace(" ", "")
     my_bic = config.get("bic", "KASSBE22")
@@ -311,6 +310,11 @@ def generate_coda_export(start_date, end_date):
     
     coda_lines = []
     seq_nr = start_seq - 1
+    
+    # TELLERS VOOR RECORD 9 (TRAILER)
+    total_debit = 0.0
+    total_credit = 0.0
+    record_count = 0
 
     for index, row in selection.iterrows():
         if row['Totaal_Omzet'] == 0 and row['Totaal_Geld'] == 0: continue
@@ -321,63 +325,76 @@ def generate_coda_export(start_date, end_date):
         
         transactions = []
         
-        # Omzet (Geld erbij = Credit = 0)
+        # Omzet (Geld erbij = Credit = 0 in CODA, POSITIEF SALDO EFFECT)
         totaal_omzet = row['Totaal_Omzet']
         if totaal_omzet > 0:
             transactions.append({"amount": totaal_omzet, "sign": "0", "desc": f"Dagontvangsten {row['Omschrijving']}"})
+            total_credit += totaal_omzet
 
-        # Betalingen (Geld weg = Debet = 1)
+        # Betalingen (Geld weg = Debet = 1 in CODA, NEGATIEF SALDO EFFECT)
         for col, name in [('Geld_Bancontact', 'Bancontact'), ('Geld_Payconiq', 'Payconiq'), 
                           ('Geld_Overschrijving', 'Overschrijving'), ('Geld_Bonnen', 'Bonnen'),
                           ('Geld_Afstorting', 'Afstorting')]:
             val = row[col]
             if val > 0:
                 transactions.append({"amount": val, "sign": "1", "desc": name})
+                total_debit += val
 
         daily_movement = 0
         for t in transactions:
-            if t['sign'] == '0': daily_movement += t['amount']
-            else: daily_movement -= t['amount']
+            if t['sign'] == '0': daily_movement += t['amount'] # Credit +
+            else: daily_movement -= t['amount'] # Debet -
             
         old_balance = current_balance
         new_balance = old_balance + daily_movement
         current_balance = new_balance
 
-        # 0. HEADER
+        # 0. HEADER (Geen teller)
         line0 = f"0{seq_nr:03d}{datum_coda}{my_bic:<11}{my_iban:<34}{'':<73}"
         coda_lines.append(line0.ljust(128)[:128])
 
-        # 1. OLD BALANCE
+        # 1. OLD BALANCE (Geen teller)
+        # 0 = Credit (Positief), 1 = Debet (Negatief). Kassa saldo is normaal positief (Credit in bank termen voor de klant, maar hier 'bezit').
+        # In CODA voor bank: Saldo in voordeel klant = Credit (0). 
         old_sign = "0" if old_balance >= 0 else "1"
         old_abs = abs(old_balance)
         line1 = f"10{seq_nr:03d}{my_iban:<37}{old_sign}{old_abs:015.3f}".replace(".", "") + f"{datum_coda}{'':<63}"
         coda_lines.append(line1.ljust(128)[:128])
 
-        # 2. MOVEMENTS
+        # 2. MOVEMENTS (Tellen mee voor record count)
         for trx in transactions:
             amount_str = f"{trx['amount']:015.3f}".replace(".", "")
+            # Detail code 0000, Structure 0 (Simple)
+            # Yuki verwacht soms structured, maar unstructured (0000) werkt meestal.
             line21 = f"21{seq_nr:04d}0000{'':<21}{trx['sign']}{amount_str}{datum_coda}{'':<53}"
             coda_lines.append(line21.ljust(128)[:128])
+            record_count += 1
             
+            # Beschrijving (Telt ook mee)
             desc_short = trx['desc'][:53]
             line22 = f"22{seq_nr:04d}0000{'':<10}{desc_short:<53}{'':<53}" 
             coda_lines.append(line22.ljust(128)[:128])
+            record_count += 1
 
-        # 8. NEW BALANCE
+        # 8. NEW BALANCE (Geen teller)
         new_sign = "0" if new_balance >= 0 else "1"
         new_abs = abs(new_balance)
         line8 = f"80{seq_nr:03d}{my_iban:<37}{new_sign}{new_abs:015.3f}".replace(".", "") + f"{datum_coda}{'':<63}"
         coda_lines.append(line8.ljust(128)[:128])
 
-    # 9. TRAILER
-    line9 = f"9{'':<127}"
+    # 9. TRAILER (De TOTALEN)
+    # Pos 17-31: Total Debit
+    # Pos 32-46: Total Credit
+    str_debit = f"{total_debit:015.3f}".replace(".", "")
+    str_credit = f"{total_credit:015.3f}".replace(".", "")
+    # Aantal records (movements 21/22/23/31...) - NIET 0,1,8,9
+    # Pos 11-16: Aantal
+    line9 = f"9{'':<5}{record_count:06d}{str_debit}{str_credit}{'':<81}"
     coda_lines.append(line9.ljust(128)[:128])
     
-    # Update config met nieuwe sequence number
     config["coda_seq"] = seq_nr
     save_config(config)
     
-    # Bestandsnaam genereren
     filename = f"CODA {datetime.now().year}-{start_seq:03d} - {datetime.now().year}-{seq_nr:03d}.cod"
 
     return "\r\n".join(coda_lines), filename
