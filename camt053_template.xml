@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+    <BkToCstmrStmt>
+        <GrpHdr>
+            <MsgId>{{ msg_id }}</MsgId>
+            <CreDtTm>{{ creation_datetime }}</CreDtTm>
+        </GrpHdr>
+        {% for stmt in statements %}
+        <Stmt>
+            <Id>{{ stmt.id }}</Id>
+            <ElctrncSeqNb>{{ stmt.seq_nb }}</ElctrncSeqNb>
+            <CreDtTm>{{ creation_datetime }}</CreDtTm>
+            <Acct>
+                <Id><IBAN>{{ iban }}</IBAN></Id>
+                <Ccy>EUR</Ccy>
+            </Acct>
+
+            <Bal>
+                <Tp><CdOrPrtry><Cd>OPBD</Cd></CdOrPrtry></Tp>
+                <Amt Ccy="EUR">{{ "%.2f"|format(stmt.opening_balance|abs) }}</Amt>
+                <CdtDbtInd>{% if stmt.opening_balance >= 0 %}CRDT{% else %}DBIT{% endif %}</CdtDbtInd>
+                <Dt><Dt>{{ stmt.date }}</Dt></Dt>
+            </Bal>
+
+            <Bal>
+                <Tp><CdOrPrtry><Cd>CLBD</Cd></CdOrPrtry></Tp>
+                <Amt Ccy="EUR">{{ "%.2f"|format(stmt.closing_balance|abs) }}</Amt>
+                <CdtDbtInd>{% if stmt.closing_balance >= 0 %}CRDT{% else %}DBIT{% endif %}</CdtDbtInd>
+                <Dt><Dt>{{ stmt.date }}</Dt></Dt>
+            </Bal>
+
+            {% for ntry in stmt.entries %}
+            <Ntry>
+                <Amt Ccy="EUR">{{ "%.2f"|format(ntry.amt|abs) }}</Amt>
+                <CdtDbtInd>{{ ntry.sign }}</CdtDbtInd>
+                <Sts>BOOK</Sts>
+                <BookgDt><Dt>{{ stmt.date }}</Dt></BookgDt>
+                <ValDt><Dt>{{ stmt.date }}</Dt></ValDt>
+                <BkTxCd>
+                    <Domn>
+                        <Cd>{{ ntry.dom }}</Cd>
+                        <Fmly>
+                            <Cd>{{ ntry.fam }}</Cd>
+                            <SubFmlyCd>{{ ntry.sub }}</SubFmlyCd>
+                        </Fmly>
+                    </Domn>
+                </BkTxCd>
+                <NtryDtls>
+                    <TxDtls>
+                        <RmtInf><Ustrd>{{ ntry.desc }}</Ustrd></RmtInf>
+                    </TxDtls>
+                </NtryDtls>
+            </Ntry>
+            {% endfor %}
+        </Stmt>
+        {% endfor %}
+    </BkToCstmrStmt>
+</Document>
