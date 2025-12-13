@@ -1,86 +1,61 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02"
-          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-          xsi:schemaLocation="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02 camt.053.001.02.xsd">
-    <BkToCstmrStmt>
-        <GrpHdr>
-            <MsgId>{{ msg_id }}</MsgId>
-            <CreDtTm>{{ creation_datetime }}</CreDtTm>
-        </GrpHdr>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt>
+    <GrpHdr>
+      <MsgId>{{ msg_id }}</MsgId>
+      <CreDtTm>{{ creation_datetime }}</CreDtTm>
+    </GrpHdr>
 
-        <Stmt>
-            <ElctrncSeqNb>{{ "%06d" % statements|length }}</ElctrncSeqNb>
-            <LglSeqNb>{{ statements|last.seq_nb }}</LglSeqNb>
-            <CreDtTm>{{ creation_datetime }}</CreDtTm>
+    <Stmt>
+      <ElctrncSeqNb>{{ statements|last.seq_nb }}</ElctrncSeqNb>
+      <CreDtTm>{{ creation_datetime }}</CreDtTm>
 
-            <!-- Rekeningidentificatie -->
-            <Acct>
-                <Id>
-                    <IBAN>{{ iban }}</IBAN>
-                </Id>
-                <Ccy>EUR</Ccy>
-            </Acct>
+      <Acct>
+        <Id><IBAN>{{ iban }}</IBAN></Id>
+        <Ccy>EUR</Ccy>
+      </Acct>
 
-            {% for stmt in statements %}
-            <Bal>
-                <Tp>
-                    <Cd>OPBD</Cd> <!-- Opening Balance -->
-                </Tp>
-                <Amt Ccy="EUR">{{ "%.2f" % stmt.opening_balance }}</Amt>
-                <CdtDbtInd>{% if stmt.opening_balance >= 0 %}CRDT{% else %}DBIT{% endif %}</CdtDbtInd>
-                <Dt><Dt>{{ stmt.date }}</Dt></Dt>
-            </Bal>
-            {% endfor %}
+      <!-- 1. Enkele Opening Balance (beginsaldo hele periode) -->
+      <Bal>
+        <Tp><CdOrPrtry><Cd>OPBD</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="EUR">{{ "%.2f" % (statements|first.opening_balance|float|abs) }}</Amt>
+        <CdtDbtInd>{% if statements|first.opening_balance >= 0 %}CRDT{% else %}DBIT{% endif %}</CdtDbtInd>
+        <Dt><Dt>{{ statements|first.date }}</Dt></Dt>
+      </Bal>
 
-            <!-- Alle mutaties per dag -->
-            {% for stmt in statements %}
-                {% for entry in stmt.entries %}
-                <Ntry>
-                    <Amt Ccy="EUR">{{ "%.2f" % entry.amt }}</Amt>
-                    <CdtDbtInd>{{ entry.sign }}</CdtDbtInd>
-                    <Sts>BOOK</Sts>
-                    <BookgDt><Dt>{{ stmt.date }}</Dt></BookgDt>
-                    <ValDt><Dt>{{ stmt.date }}</Dt></ValDt>
+      <!-- Alle transacties chronologisch -->
+      {% for stmt in statements %}
+        {% for entry in stmt.entries %}
+        <Ntry>
+          <Amt Ccy="EUR">{{ "%.2f" % entry.amt }}</Amt>
+          <CdtDbtInd>{{ entry.sign }}</CdtDbtInd>
+          <Sts>BOOK</Sts>
+          <BookgDt><Dt>{{ stmt.date }}</Dt></BookgDt>
+          <ValDt><Dt>{{ stmt.date }}</Dt></ValDt>
+          <AcctSvcrRef>{{ stmt.id }}</AcctSvcrRef>
+          <BkTxCd>
+            <Domn>
+              <Cd>{{ entry.dom }}</Cd>
+              <Fmly><Cd>{{ entry.fam }}</Cd><SubFmlyCd>{{ entry.sub }}</SubFmlyCd></Fmly>
+            </Domn>
+          </BkTxCd>
+          <NtryDtls>
+            <TxDtls>
+              <RmtInf><Ustrd>{{ entry.desc | escape }}</Ustrd></RmtInf>
+            </TxDtls>
+          </NtryDtls>
+        </Ntry>
+        {% endfor %}
+      {% endfor %}
 
-                    <AcctSvcrRef>{{ stmt.id }}</AcctSvcrRef>
-                    <BkTxCd>
-                        <Domn>
-                            <Cd>{{ entry.dom }}</Cd>
-                            <Fmly>
-                                <Cd>{{ entry.fam }}</Cd>
-                                <SubFmlyCd>{{ entry.sub }}</SubFmlyCd>
-                            </Fmly>
-                        </Domn>
-                    </BkTxCd>
+      <!-- 2. Enkele Closing Balance (eindsaldo hele periode) -->
+      <Bal>
+        <Tp><CdOrPrtry><Cd>CLBD</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="EUR">{{ "%.2f" % (statements|last.closing_balance|float|abs) }}</Amt>
+        <CdtDbtInd>{% if statements|last.closing_balance >= 0 %}CRDT{% else %}DBIT{% endif %}</CdtDbtInd>
+        <Dt><Dt>{{ statements|last.date }}</Dt></Dt>
+      </Bal>
 
-                    <NtryDtls>
-                        <TxDtls>
-                            <Refs>
-                                <EndToEndId>NOTPROVIDED</EndToEndId>
-                            </Refs>
-                            <RltdPties>
-                                <Dbtr>
-                                    <Nm>Kassa dagelijks</Nm>
-                                </Dbtr>
-                            </RltdPties>
-                            <RmtInf>
-                                <Ustrd>{{ entry.desc | escape }}</Ustrd>
-                            </RmtInf>
-                        </TxDtls>
-                    </NtryDtls>
-                </Ntry>
-                {% endfor %}
-
-                <!-- Eindsaldo van de dag -->
-                <Bal>
-                    <Tp>
-                        <Cd>CLBD</Cd> <!-- Closing Balance -->
-                    </Tp>
-                    <Amt Ccy="EUR">{{ "%.2f" % stmt.closing_balance }}</Amt>
-                    <CdtDbtInd>{% if stmt.closing_balance >= 0 %}CRDT{% else %}DBIT{% endif %}</CdtDbtInd>
-                    <Dt><Dt>{{ stmt.date }}</Dt></Dt>
-                </Bal>
-            {% endfor %}
-        </Stmt>
-    </BkToCstmrStmt>
+    </Stmt>
+  </BkToCstmrStmt>
 </Document>
