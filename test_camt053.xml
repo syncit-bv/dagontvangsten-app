@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt>
+    <GrpHdr>
+      <MsgId>KASSA-20251210143022</MsgId>
+      <CreDtTm>2025-12-10T14:30:22</CreDtTm>
+    </GrpHdr>
+
+    <Stmt>
+      <ElctrncSeqNb>48</ElctrncSeqNb>
+      <CreDtTm>2025-12-10T14:30:22</CreDtTm>
+
+      <Acct>
+        <Id>
+          <IBAN>BE68539007547034</IBAN>
+        </Id>
+        <Ccy>EUR</Ccy>
+      </Acct>
+
+      <!-- 1. Beginsaldo van de periode -->
+      <Bal>
+        <Tp><CdOrPrtry><Cd>OPBD</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="EUR">1250.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt><Dt>2025-01-08</Dt></Dt>
+      </Bal>
+
+      <!-- Boeking 1 – Dagomzet 8 januari -->
+      <Ntry>
+        <Amt Ccy="EUR">1847.50</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2025-01-08</Dt></BookgDt>
+        <ValDt><Dt>2025-01-08</Dt></ValDt>
+        <AcctSvcrRef>2025-000045</AcctSvcrRef>
+        <BkTxCd>
+          <Domn>
+            <Cd>PMNT</Cd>
+            <Fmly><Cd>RCDT</Cd><SubFmlyCd>ESCT</SubFmlyCd></Fmly>
+          </Domn>
+        </BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <RmtInf><Ustrd>Dagontvangsten Woensdag 8 januari</Ustrd></RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+
+      <!-- Boeking 2 – Bancontact uitgaven 8 januari -->
+      <Ntry>
+        <Amt Ccy="EUR">1200.00</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2025-01-08</Dt></BookgDt>
+        <ValDt><Dt>2025-01-08</Dt></ValDt>
+        <AcctSvcrRef>2025-000046</AcctSvcrRef>
+        <BkTxCd>
+          <Domn>
+            <Cd>PMNT</Cd>
+            <Fmly><Cd>ICDT</Cd><SubFmlyCd>ESCT</SubFmlyCd></Fmly>
+          </Domn>
+        </BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <RmtInf><Ustrd>Bancontact afstorting 08-01-2025</Ustrd></RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+
+      <!-- Boeking 3 – Omzet 9 januari -->
+      <Ntry>
+        <Amt Ccy="EUR">2103.20</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2025-01-09</Dt></BookgDt>
+        <ValDt><Dt>2025-01-09</Dt></ValDt>
+        <AcctSvcrRef>2025-000047</AcctSvcrRef>
+        <BkTxCd>
+          <Domn>
+            <Cd>PMNT</Cd>
+            <Fmly><Cd>RCDT</Cd><SubFmlyCd>ESCT</SubFmlyCd></Fmly>
+          </Domn>
+        </BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <RmtInf><Ustrd>Dagontvangsten Donderdag 9 januari</Ustrd></RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+
+      <!-- Boeking 4 – Payconiq + Overschrijving 9 januari -->
+      <Ntry>
+        <Amt Ccy="EUR">1950.00</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2025-01-09</Dt></BookgDt>
+        <ValDt><Dt>2025-01-09</Dt></ValDt>
+        <AcctSvcrRef>2025-000048</AcctSvcrRef>
+        <BkTxCd>
+          <Domn>
+            <Cd>PMNT</Cd>
+            <Fmly><Cd>ICDT</Cd><SubFmlyCd>ESCT</SubFmlyCd></Fmly>
+          </Domn>
+        </BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <RmtInf><Ustrd>Payconiq + overschrijving 09-01-2025</Ustrd></RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+
+      <!-- 2. Eindsaldo van de periode -->
+      <Bal>
+        <Tp><CdOrPrtry><Cd>CLBD</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="EUR">2050.70</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt><Dt>2025-01-09</Dt></Dt>
+      </Bal>
+
+    </Stmt>
+  </BkToCstmrStmt>
+</Document>
