@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="utf-8">
+    <title>Bankafschrift Kassa – {{ period_start }} t/m {{ period_end }}</title>
+    <style>
+        /* Wordt overschreven door WeasyPrint CSS, maar handig voor preview */
+        body { font-family: Arial, sans-serif; margin: 40px; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        {% if logo_path %}
+        <img src="{{ logo_path }}" class="logo" alt="Logo">
+        {% endif %}
+        <h1>{{ company_name }}</h1>
+        <h2>Dagelijks bankafschrift kassa</h2>
+        <p><strong>Rekening:</strong> {{ iban }}<br>
+           <strong>Periode:</strong> {{ period_start }} t/m {{ period_end }}<br>
+           <strong>gegenereerd op:</strong> {{ generated_on }}</p>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Datum</th>
+                <th>Omschrijving</th>
+                <th class="credit">Bij</th>
+                <th class="debit">Af</th>
+                <th class="balance">Saldo</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>{{ period_start }}</td>
+                <td><strong>Beginsaldo</strong></td>
+                <td></td>
+                <td></td>
+                <td class="balance">€ {{ "%.2f" % opening_balance }}</td>
+            </tr>
+
+            {% for row in rows %}
+            <tr>
+                <td>{{ row.date }}</td>
+                <td>{{ row.desc }}</td>
+                <td class="credit">{% if row.credit %}€ {{ "%.2f" % row.credit }}{% endif %}</td>
+                <td class="debit">{% if row.debit %}€ {{ "%.2f" % row.debit }}{% endif %}</td>
+                <td class="balance">€ {{ "%.2f" % row.balance }}</td>
+            </tr>
+            {% endfor %}
+
+            <tr style="font-weight: bold; background-color: #f8f8f8;">
+                <td colspan="2">Eindsaldo</td>
+                <td>€ {{ "%.2f" % total_credit }}</td>
+                <td>€ {{ "%.2f" % total_debit }}</td>
+                <td class="balance">€ {{ "%.2f" % closing_balance }}</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div style="margin-top: 60px; font-size: 9pt; color: #666;">
+        <p>Dit afschrift is automatisch gegenereerd uit de dagelijkse kassa-afsluitingen.</p>
+    </div>
+
+</body>
+</html>
