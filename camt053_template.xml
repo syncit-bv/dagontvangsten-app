@@ -5,6 +5,7 @@
             <MsgId>{{ msg_id }}</MsgId>
             <CreDtTm>{{ creation_datetime }}</CreDtTm>
         </GrpHdr>
+
         {% for stmt in statements %}
         <Stmt>
             <Id>{{ stmt.id }}</Id>
