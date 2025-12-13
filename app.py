@@ -1,3 +1,107 @@
+# Voeg deze import bovenaan toe als je die nog niet hebt
+from jinja2 import Environment, FileSystemLoader
+
+# --- XML EXPORT ENGINE (TEMPLATE VERSIE) ---
+def generate_xml_export(start_date, end_date):
+    df_data = load_database()
+    config = load_config()
+    mask = (df_data['Datum'] >= str(start_date)) & (df_data['Datum'] <= str(end_date))
+    selection = df_data.loc[mask].sort_values(by="Datum", ascending=True)
+    if selection.empty: return None, None 
+    
+    my_iban = config.get("iban", "").replace(" ", "")
+    coda_seq = int(config.get("coda_seq", 0))
+    MAPPING = get_yuki_mapping()
+
+    # Data voorbereiden voor de template
+    statements_data = []
+    
+    # Startsaldo ophalen
+    first_date = selection.iloc[0]['Datum']
+    current_balance_val = calculate_current_saldo(first_date)
+
+    # Loop door de dagen
+    for index, row in selection.iterrows():
+        if row['Totaal_Omzet'] == 0 and row['Totaal_Geld'] == 0: continue
+        
+        coda_seq += 1
+        datum_iso = row['Datum']
+        
+        # 1. Transacties verzamelen
+        transactions = []
+        
+        # Omzet
+        totaal_omzet = float(row['Totaal_Omzet'])
+        if totaal_omzet > 0:
+             transactions.append({
+                "amt": totaal_omzet, "sign": "CRDT", 
+                "desc": f"Dagontvangsten {row['Omschrijving']}", 
+                "dom": "PMNT", "fam": "RCDT", "sub": "ESCT"
+            })
+
+        # Uitgaven
+        for col, code_key in [('Geld_Bancontact', 'Bancontact'), ('Geld_Payconiq', 'Payconiq'), 
+                              ('Geld_Overschrijving', 'Oversch'), ('Geld_Bonnen', 'Bonnen'),
+                              ('Geld_Afstorting', 'Afstorting')]:
+            val = float(row[col])
+            if val > 0:
+                info = MAPPING.get(code_key, {})
+                template_str = info.get('Template', '')
+                label = info.get('Label', code_key)
+                desc_text = template_str.replace("&datum&", datum_iso).replace("&notitie&", "")
+                if not desc_text: desc_text = label
+                
+                transactions.append({
+                    "amt": val, "sign": "DBIT", "desc": desc_text,
+                    "dom": "PMNT", "fam": "ICDT", "sub": "ESCT"
+                })
+        
+        # 2. Eindsaldo berekenen
+        daily_movement = 0.0
+        for t in transactions:
+            if t['sign'] == "CRDT": daily_movement += t['amt']
+            else: daily_movement -= t['amt']
+            
+        closing_balance_val = current_balance_val + daily_movement
+        
+        # 3. Dag toevoegen aan data-lijst
+        statements_data.append({
+            "id": f"{datetime.now().year}-{coda_seq}",
+            "seq_nb": coda_seq,
+            "date": datum_iso,
+            "opening_balance": current_balance_val,
+            "closing_balance": closing_balance_val,
+            "entries": transactions
+        })
+        
+        # Saldo doorschuiven
+        current_balance_val = closing_balance_val
+
+    # Update config
+    config["coda_seq"] = coda_seq
+    save_config(config)
+
+    # 4. Template laden en invullen
+    try:
+        env = Environment(loader=FileSystemLoader('.'))
+        template = env.get_template('camt053_template.xml')
+        
+        context = {
+            "msg_id": f"KASSA-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            "creation_datetime": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            "iban": my_iban,
+            "statements": statements_data
+        }
+        
+        full_xml_string = template.render(context)
+        filename = f"CAMT053_{my_iban}_{datetime.now().strftime('%Y%m%d')}.xml"
+        return full_xml_string, filename
+        
+    except Exception as e:
+        st.error(f"Fout bij laden template: {e}")
+        return None, None
+
+
 # --- XML EXPORT ENGINE (CAMT.053) ---
 # VERSIE: STRING BUILDER (Veiliger voor Yuki dan ElementTree)
 def generate_xml_export(start_date, end_date):
