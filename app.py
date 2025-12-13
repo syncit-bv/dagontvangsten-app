@@ -1,282 +1,5 @@
-import streamlit as st
-import pandas as pd
-from datetime import datetime, timedelta, date
-import time
-import os
-import locale
-import calendar
-import json
-import random
-import xml.etree.ElementTree as ET
-
-# Probeer NL instellingen
-try: locale.setlocale(locale.LC_TIME, 'nl_NL.UTF-8')
-except: pass
-
-# --- CONFIGURATIE ---
-DATA_FILE = "kassa_historiek.csv"
-SETTINGS_FILE = "kassa_settings.csv"
-EXPORT_CONFIG_FILE = "export_config.csv"
-CONFIG_FILE = "kassa_config.json"
-ADMIN_PASSWORD = "Yuki2025!" 
-
-st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="centered")
-
-# --- CSS STYLING ---
-st.markdown("""
-    <style>
-    header[data-testid="stHeader"] { background-color: transparent !important; }
-    .block-container { padding-top: 3.5rem !important; padding-bottom: 2rem; }
-    .info-card {
-        height: 50px; display: flex; align-items: center; justify-content: center;
-        border-radius: 8px; font-weight: bold; font-size: 0.95rem; margin-bottom: 10px;
-        border: 1px solid rgba(49, 51, 63, 0.1);
-    }
-    .card-red   { background-color: #fce8e6; color: #a30f0f; }
-    .card-green { background-color: #e6fcf5; color: #0f5132; }
-    .card-grey  { background-color: #f0f2f6; color: #31333f; }
-    div.stButton > button { width: 100%; }
-    div[data-testid="stDateInput"] { text-align: center; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- FUNCTIES: CONFIG & SETTINGS ---
-
-def generate_valid_belgian_iban():
-    protocol = "999" 
-    random_part = "".join([str(random.randint(0, 9)) for _ in range(7)])
-    base_num = int(protocol + random_part)
-    remainder = base_num % 97
-    check_digits = 97 if remainder == 0 else remainder
-    bban = f"{protocol}{random_part}{check_digits:02d}"
-    country_code_num = "111400" 
-    iban_check_base = int(bban + country_code_num)
-    iban_remainder = iban_check_base % 97
-    iban_check = 98 - iban_remainder
-    return f"BE{iban_check:02d}{bban}"
-
-def load_config():
-    default_config = {
-        "start_saldo": 0.0, 
-        "iban": "", 
-        "coda_seq": 0,
-        "laatste_update": str(datetime.now().date())
-    }
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "r") as f: 
-            data = json.load(f)
-            if "iban" not in data: data["iban"] = default_config["iban"]
-            if "coda_seq" not in data: data["coda_seq"] = 0
-            return data
-    return default_config
-
-def save_config(config_data):
-    with open(CONFIG_FILE, "w") as f: json.dump(config_data, f)
-
-def get_default_settings():
-    # Standaard instellingen met GL-codes voor automatische matching
-    return [
-        {"Code": "Omzet_21",   "Label": "Omzet 21%",       "Rekening": "700021", "ExportDesc": "Omzet 21% (&notitie&) GL-700021", "BtwCode": "V21", "Type": "Credit"},
-        {"Code": "Omzet_12",   "Label": "Omzet 12%",       "Rekening": "700012", "ExportDesc": "Omzet 12% (&notitie&) GL-700012", "BtwCode": "V12", "Type": "Credit"},
-        {"Code": "Omzet_6",    "Label": "Omzet 6%",        "Rekening": "700006", "ExportDesc": "Omzet 6% (&notitie&) GL-700006",  "BtwCode": "V6",  "Type": "Credit"},
-        {"Code": "Omzet_0",    "Label": "Omzet 0%",        "Rekening": "700000", "ExportDesc": "Omzet 0% (&notitie&) GL-700000",  "BtwCode": "V0",  "Type": "Credit"},
-        
-        {"Code": "Cash",       "Label": "Kas (Cash)",      "Rekening": "570000", "ExportDesc": "Ontvangst Cash GL-570000",        "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Bancontact", "Label": "Bancontact",      "Rekening": "580000", "ExportDesc": "Bancontact &datum& GL-580000",     "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Payconiq",   "Label": "Payconiq",        "Rekening": "580000", "ExportDesc": "Payconiq &datum& GL-580000",       "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Oversch",    "Label": "Overschrijving",  "Rekening": "580000", "ExportDesc": "Overschrijving &datum& GL-580000","BtwCode": "",    "Type": "Debet"},
-        {"Code": "Bonnen",     "Label": "Cadeaubonnen",    "Rekening": "440000", "ExportDesc": "Cadeaubon &datum& GL-440000",      "BtwCode": "",    "Type": "Debet"},
-        {"Code": "Afstorting", "Label": "Afstorting Bank", "Rekening": "550000", "ExportDesc": "Afstorting &datum& GL-550000",     "BtwCode": "",    "Type": "Credit"},
-    ]
-
-def load_settings():
-    if os.path.exists(SETTINGS_FILE):
-        df = pd.read_csv(SETTINGS_FILE, dtype={"Rekening": str, "BtwCode": str})
-        if "ExportDesc" not in df.columns:
-            df["ExportDesc"] = df["Label"]
-            df.to_csv(SETTINGS_FILE, index=False)
-        if "Kas" in df["Code"].values:
-            df.loc[df["Code"] == "Kas", "Code"] = "Cash"
-            df.to_csv(SETTINGS_FILE, index=False)
-        defaults = pd.DataFrame(get_default_settings())
-        for code in ["Oversch", "Afstorting"]:
-            if code not in df["Code"].values:
-                row = defaults[defaults["Code"] == code].iloc[0]
-                df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-                df.to_csv(SETTINGS_FILE, index=False)
-        return df
-    else:
-        df = pd.DataFrame(get_default_settings())
-        df["Rekening"] = df["Rekening"].astype(str)
-        df.to_csv(SETTINGS_FILE, index=False)
-        return df
-
-def save_settings(df_settings): df_settings.to_csv(SETTINGS_FILE, index=False)
-def get_yuki_mapping():
-    df = load_settings()
-    mapping = {}
-    for index, row in df.iterrows():
-        mapping[row['Code']] = {
-            'Rekening': row['Rekening'],
-            'Label': row['Label'],
-            'Template': row.get('ExportDesc', row['Label']) 
-        }
-    return mapping
-
-# --- EXPORT CONFIG (CSV) ---
-def get_default_export_config():
-    return [
-        {"Kolom": "Grootboekrekening kas", "Bron": "Vast", "Waarde": "570000"},
-        {"Kolom": "Kas omschrijving",      "Bron": "Vast", "Waarde": "Dagontvangsten"},
-        {"Kolom": "Transactie code",       "Bron": "Vast", "Waarde": ""},
-        {"Kolom": "Tegenrekening",         "Bron": "Veld", "Waarde": "Grootboekrekening"}, 
-        {"Kolom": "Naam tegenrekening",    "Bron": "Veld", "Waarde": "Label"}, 
-        {"Kolom": "Datum transactie",      "Bron": "Veld", "Waarde": "Datum"},              
-        {"Kolom": "Omschrijving",          "Bron": "Veld", "Waarde": "Omschrijving"},
-        {"Kolom": "Bedrag",                "Bron": "Veld", "Waarde": "Bedrag"},
-        {"Kolom": "Saldo kas",             "Bron": "Vast", "Waarde": ""}, 
-        {"Kolom": "Projectcode",           "Bron": "Vast", "Waarde": ""},
-        {"Kolom": "Projectnaam",           "Bron": "Vast", "Waarde": ""},
-    ]
-
-def load_export_config():
-    if os.path.exists(EXPORT_CONFIG_FILE):
-        return pd.read_csv(EXPORT_CONFIG_FILE)
-    else:
-        df = pd.DataFrame(get_default_export_config())
-        df.to_csv(EXPORT_CONFIG_FILE, index=False)
-        return df
-
-def save_export_config(df): df.to_csv(EXPORT_CONFIG_FILE, index=False)
-
-# --- DATA ---
-def load_database():
-    if os.path.exists(DATA_FILE):
-        df = pd.read_csv(DATA_FILE)
-        df = df.fillna("") 
-        for col in ["Geld_Overschrijving", "Geld_Afstorting"]:
-            if col not in df.columns: df[col] = 0.0
-        return df
-    else:
-        cols = ["Datum", "Omschrijving", "Totaal_Omzet", "Totaal_Geld", "Verschil", "Omzet_0", "Omzet_6", "Omzet_12", "Omzet_21", "Geld_Bancontact", "Geld_Cash", "Geld_Payconiq", "Geld_Overschrijving", "Geld_Bonnen", "Geld_Afstorting", "Timestamp"]
-        return pd.DataFrame(columns=cols)
-
-def get_data_by_date(datum_obj):
-    df = load_database()
-    match = df[df['Datum'] == str(datum_obj)]
-    return match.iloc[0] if not match.empty else None
-
-def calculate_current_saldo(target_date):
-    config = load_config()
-    start = float(config.get("start_saldo", 0.0))
-    df = load_database()
-    if df.empty: return start
-    df['DatumDT'] = pd.to_datetime(df['Datum'])
-    hist = df[df['DatumDT'] < pd.to_datetime(target_date)]
-    return start + hist['Geld_Cash'].sum() - hist['Geld_Afstorting'].sum()
-
-def save_transaction(datum, omschrijving, df_input, totaal_omzet, totaal_geld, verschil):
-    df_db = load_database()
-    datum_str = str(datum)
-    df_db = df_db[df_db['Datum'] != datum_str]
-    
-    if df_input is None: df_input = pd.DataFrame(columns=['Label', 'Bedrag'])
-    if not omschrijving or omschrijving.strip() == "" or omschrijving == "nan":
-        omschrijving = f"Dagontvangsten {pd.to_datetime(datum).strftime('%d-%m-%Y')}"
-        
-    new_row = {
-        "Datum": datum_str, "Omschrijving": omschrijving, "Totaal_Omzet": totaal_omzet, "Totaal_Geld": totaal_geld, "Verschil": verschil,
-        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "Omzet_0": 0.0, "Omzet_6": 0.0, "Omzet_12": 0.0, "Omzet_21": 0.0,
-        "Geld_Bancontact": 0.0, "Geld_Cash": 0.0, "Geld_Payconiq": 0.0, "Geld_Overschrijving": 0.0, "Geld_Bonnen": 0.0, "Geld_Afstorting": 0.0
-    }
-    for index, row in df_input.iterrows():
-        label = row['Label']
-        bedrag = row['Bedrag']
-        if bedrag > 0:
-            if "0%" in label: new_row["Omzet_0"] = bedrag
-            elif "6%" in label: new_row["Omzet_6"] = bedrag
-            elif "12%" in label: new_row["Omzet_12"] = bedrag
-            elif "21%" in label: new_row["Omzet_21"] = bedrag
-            elif "Bancontact" in label: new_row["Geld_Bancontact"] = bedrag
-            elif "Cash" in label: new_row["Geld_Cash"] = bedrag
-            elif "Payconiq" in label: new_row["Geld_Payconiq"] = bedrag
-            elif "Overschrijving" in label: new_row["Geld_Overschrijving"] = bedrag
-            elif "Bonnen" in label: new_row["Geld_Bonnen"] = bedrag
-            elif "Afstorting" in label: new_row["Geld_Afstorting"] = bedrag
-    new_entry_df = pd.DataFrame([new_row])
-    df_db = pd.concat([df_db, new_entry_df], ignore_index=True)
-    df_db = df_db.sort_values(by="Datum", ascending=False)
-    if 'DatumDT' in df_db.columns: del df_db['DatumDT']
-    df_db.to_csv(DATA_FILE, index=False)
-
-def handle_save_click(datum, omschrijving, edited_df, som_omzet, som_geld, verschil):
-    save_transaction(datum, omschrijving, edited_df, som_omzet, som_geld, verschil)
-    st.session_state.reset_count += 1
-    st.session_state.omschrijving = "" 
-    st.session_state['show_success_toast'] = True
-
-# --- EXPORT ENGINE (CSV) ---
-def generate_csv_export(start_date, end_date):
-    df_data = load_database()
-    export_config = load_export_config()
-    MAPPING = get_yuki_mapping() 
-    mask = (df_data['Datum'] >= str(start_date)) & (df_data['Datum'] <= str(end_date))
-    selection = df_data.loc[mask].sort_values(by="Datum", ascending=True)
-    if selection.empty: return None
-
-    export_rows = []
-    for index, row in selection.iterrows():
-        if row['Totaal_Omzet'] == 0 and row['Totaal_Geld'] == 0: continue
-        datum_fmt = pd.to_datetime(row['Datum']).strftime('%d-%m-%Y')
-        desc_user = row['Omschrijving'] 
-        transactions = []
-        
-        def add_trx(code_key, bedrag, btw):
-            info = MAPPING.get(code_key, {})
-            rekening = info.get('Rekening', '')
-            label = info.get('Label', code_key)
-            template = info.get('Template', '')
-            final_desc = template.replace("&datum&", datum_fmt).replace("&date&", datum_fmt).replace("&label&", label).replace("&notitie&", desc_user)
-            if not final_desc: final_desc = f"{label} {datum_fmt}"
-            transactions.append({"Rek": rekening, "Bedrag": bedrag, "Btw": btw, "Desc": final_desc, "Label": label})
-
-        # LOGICA VOOR CSV:
-        if row['Omzet_21'] > 0: add_trx("Omzet_21", row['Omzet_21'], "V21")
-        if row['Omzet_12'] > 0: add_trx("Omzet_12", row['Omzet_12'], "V12")
-        if row['Omzet_6'] > 0:  add_trx("Omzet_6",  row['Omzet_6'],  "V6")
-        if row['Omzet_0'] > 0:  add_trx("Omzet_0",  row['Omzet_0'],  "V0")
-        
-        if row['Geld_Bancontact'] > 0:   add_trx("Bancontact", row['Geld_Bancontact'], "")
-        if row['Geld_Payconiq'] > 0:     add_trx("Payconiq",   row['Geld_Payconiq'],   "")
-        if row['Geld_Overschrijving'] > 0: add_trx("Oversch",  row['Geld_Overschrijving'], "")
-        if row['Geld_Bonnen'] > 0:       add_trx("Bonnen",     row['Geld_Bonnen'],     "")
-        if row['Geld_Cash'] > 0:         add_trx("Cash",       row['Geld_Cash'],       "")
-        
-        if row['Geld_Afstorting'] > 0:   add_trx("Afstorting", -row['Geld_Afstorting'], "")
-
-        for t in transactions:
-            export_row = {}
-            for _, cfg in export_config.iterrows():
-                col_name = cfg['Kolom']
-                source = cfg['Bron']
-                val_key = cfg['Waarde']
-                final_val = ""
-                if source == "Vast": final_val = val_key if val_key and str(val_key) != "nan" else ""
-                elif source == "Veld":
-                    if val_key == "Datum": final_val = datum_fmt
-                    elif val_key == "Omschrijving": final_val = t['Desc']
-                    elif val_key == "Label": final_val = t['Label']        
-                    elif val_key == "Bedrag": 
-                        final_val = f"{t['Bedrag']:.2f}".replace('.',',')
-                    elif val_key == "Grootboekrekening": final_val = t['Rek']
-                    elif val_key == "BtwCode": final_val = t['Btw']
-                export_row[col_name] = final_val
-            export_rows.append(export_row)
-    return pd.DataFrame(export_rows)
-
 # --- XML EXPORT ENGINE (CAMT.053) ---
-# AANGEPASTE VERSIE: EERST SALDI BEREKENEN, DAN PAS TRANSACTIES SCHRIJVEN
+# VERSIE: STRING BUILDER (Veiliger voor Yuki dan ElementTree)
 def generate_xml_export(start_date, end_date):
     df_data = load_database()
     config = load_config()
@@ -286,58 +9,43 @@ def generate_xml_export(start_date, end_date):
     
     my_iban = config.get("iban", "").replace(" ", "")
     coda_seq = int(config.get("coda_seq", 0))
+    MAPPING = get_yuki_mapping()
+
+    # We bouwen de XML op als een lange string om namespace problemen te vermijden
+    xml_output = []
     
-    # XML Setup
-    NS = "urn:iso:std:iso:20022:tech:xsd:camt.053.001.02"
-    ET.register_namespace("", NS)
-    root = ET.Element(f"{{{NS}}}Document")
+    # 1. DE HEADER (Exact zoals in het werkende v4 bestand)
+    xml_output.append('<?xml version="1.0" encoding="UTF-8"?>')
+    xml_output.append('<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">')
+    xml_output.append('  <BkToCstmrStmt>')
     
-    bk_stmt = ET.SubElement(root, "BkToCstmrStmt")
+    # GrpHdr
+    cre_dt_tm = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    msg_id = f"KASSA-{datetime.now().strftime('%Y%m%d%H%M%S')}"
     
-    # Group Header
-    grphdr = ET.SubElement(bk_stmt, "GrpHdr")
-    msg_id = ET.SubElement(grphdr, "MsgId")
-    msg_id.text = f"KASSA-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-    cre_dt = ET.SubElement(grphdr, "CreDtTm")
-    cre_dt.text = datetime.now().isoformat()
-    
+    xml_output.append('    <GrpHdr>')
+    xml_output.append(f'      <MsgId>{msg_id}</MsgId>')
+    xml_output.append(f'      <CreDtTm>{cre_dt_tm}</CreDtTm>')
+    xml_output.append('    </GrpHdr>')
+
     # Init balances
     first_date = selection.iloc[0]['Datum']
     current_balance_val = calculate_current_saldo(first_date)
-    MAPPING = get_yuki_mapping()
-    
-    # Loop days
+
+    # Loop per dag
     for index, row in selection.iterrows():
         if row['Totaal_Omzet'] == 0 and row['Totaal_Geld'] == 0: continue
         
         coda_seq += 1
-        stmt = ET.SubElement(bk_stmt, "Stmt")
+        datum_iso = row['Datum'] # YYYY-MM-DD
         
-        # ID & Seq
-        stmt_id = ET.SubElement(stmt, "Id")
-        stmt_id.text = f"{datetime.now().year}-{coda_seq}"
-        el_seq = ET.SubElement(stmt, "ElctrncSeqNb")
-        el_seq.text = str(coda_seq)
-        cre_dt_stmt = ET.SubElement(stmt, "CreDtTm")
-        cre_dt_stmt.text = datetime.now().isoformat()
-        
-        # Account
-        acct = ET.SubElement(stmt, "Acct")
-        acct_id = ET.SubElement(acct, "Id")
-        acct_iban = ET.SubElement(acct_id, "IBAN")
-        acct_iban.text = my_iban
-        acct_ccy = ET.SubElement(acct, "Ccy")
-        acct_ccy.text = "EUR"
-        
-        # ------------------------------------------------------------------
-        # STAP 1: TRANSACTIE DATA VERZAMELEN & MOVEMENT BEREKENEN
-        # We schrijven nog geen Ntry naar XML, maar bouwen een lijst
-        # ------------------------------------------------------------------
-        
+        # -----------------------------------------------------------
+        # STAP 1: Berekeningen doen (nog niks schrijven)
+        # -----------------------------------------------------------
         transactions = []
         
-        # 1. Omzet (Geld erbij = Credit)
-        totaal_omzet = row['Totaal_Omzet']
+        # A. Omzet (Credit)
+        totaal_omzet = float(row['Totaal_Omzet'])
         if totaal_omzet > 0:
              desc_full = f"Dagontvangsten {row['Omschrijving']}"
              transactions.append({
@@ -345,16 +53,16 @@ def generate_xml_export(start_date, end_date):
                 "dom": "PMNT", "fam": "RCDT", "sub": "ESCT"
             })
 
-        # 2. Uitgaven (Geld eraf = Debet)
+        # B. Uitgaven (Debet)
         for col, code_key in [('Geld_Bancontact', 'Bancontact'), ('Geld_Payconiq', 'Payconiq'), 
                               ('Geld_Overschrijving', 'Oversch'), ('Geld_Bonnen', 'Bonnen'),
                               ('Geld_Afstorting', 'Afstorting')]:
-            val = row[col]
+            val = float(row[col])
             if val > 0:
                 info = MAPPING.get(code_key, {})
                 template = info.get('Template', '')
                 label = info.get('Label', code_key)
-                desc_text = template.replace("&datum&", row['Datum']).replace("&notitie&", "")
+                desc_text = template.replace("&datum&", datum_iso).replace("&notitie&", "")
                 if not desc_text: desc_text = label
                 
                 transactions.append({
@@ -362,7 +70,7 @@ def generate_xml_export(start_date, end_date):
                     "dom": "PMNT", "fam": "ICDT", "sub": "ESCT"
                 })
         
-        # Bereken de beweging van vandaag
+        # Bereken eindsaldo van deze dag
         daily_movement = 0.0
         for t in transactions:
             if t['sign'] == "CRDT": daily_movement += t['amt']
@@ -370,354 +78,75 @@ def generate_xml_export(start_date, end_date):
             
         closing_balance_val = current_balance_val + daily_movement
 
-        # ------------------------------------------------------------------
-        # STAP 2: EERST DE SALDI SCHRIJVEN (OPENING EN SLUITING)
-        # ------------------------------------------------------------------
-
-        # Opening Balance (OPBD)
-        bal_op = ET.SubElement(stmt, "Bal")
-        tp_op = ET.SubElement(bal_op, "Tp")
-        cd_op = ET.SubElement(ET.SubElement(tp_op, "CdOrPrtry"), "Cd")
-        cd_op.text = "OPBD"
-        amt_op = ET.SubElement(bal_op, "Amt", Ccy="EUR")
-        amt_op.text = f"{abs(current_balance_val):.2f}"
-        cdt_dbt_op = ET.SubElement(bal_op, "CdtDbtInd")
-        cdt_dbt_op.text = "CRDT" if current_balance_val >= 0 else "DBIT"
-        dt_op = ET.SubElement(bal_op, "Dt")
-        dt_op_d = ET.SubElement(dt_op, "Dt")
-        dt_op_d.text = row['Datum']
+        # -----------------------------------------------------------
+        # STAP 2: De Statement (Stmt) schrijven
+        # -----------------------------------------------------------
+        xml_output.append('    <Stmt>')
+        xml_output.append(f'      <Id>{datetime.now().year}-{coda_seq}</Id>')
+        xml_output.append(f'      <ElctrncSeqNb>{coda_seq}</ElctrncSeqNb>')
+        xml_output.append(f'      <CreDtTm>{cre_dt_tm}</CreDtTm>')
         
-        # Closing Balance (CLBD) - STAAT NU HIER!
-        bal_cl = ET.SubElement(stmt, "Bal")
-        tp_cl = ET.SubElement(bal_cl, "Tp")
-        cd_cl = ET.SubElement(ET.SubElement(tp_cl, "CdOrPrtry"), "Cd")
-        cd_cl.text = "CLBD"
-        amt_cl = ET.SubElement(bal_cl, "Amt", Ccy="EUR")
-        amt_cl.text = f"{abs(closing_balance_val):.2f}"
-        cdt_dbt_cl = ET.SubElement(bal_cl, "CdtDbtInd")
-        cdt_dbt_cl.text = "CRDT" if closing_balance_val >= 0 else "DBIT"
-        dt_cl = ET.SubElement(bal_cl, "Dt")
-        dt_cl_d = ET.SubElement(dt_cl, "Dt")
-        dt_cl_d.text = row['Datum']
-
-        # ------------------------------------------------------------------
-        # STAP 3: NU PAS DE TRANSACTIES SCHRIJVEN (Ntry)
-        # ------------------------------------------------------------------
+        # Account
+        xml_output.append('      <Acct>')
+        xml_output.append('        <Id>')
+        xml_output.append(f'          <IBAN>{my_iban}</IBAN>')
+        xml_output.append('        </Id>')
+        xml_output.append('        <Ccy>EUR</Ccy>')
+        xml_output.append('      </Acct>')
         
+        # --- OPENINGSSALDO (OPBD) ---
+        sign_op = "CRDT" if current_balance_val >= 0 else "DBIT"
+        xml_output.append('      <Bal>')
+        xml_output.append('        <Tp><CdOrPrtry><Cd>OPBD</Cd></CdOrPrtry></Tp>')
+        xml_output.append(f'        <Amt Ccy="EUR">{abs(current_balance_val):.2f}</Amt>')
+        xml_output.append(f'        <CdtDbtInd>{sign_op}</CdtDbtInd>')
+        xml_output.append(f'        <Dt><Dt>{datum_iso}</Dt></Dt>')
+        xml_output.append('      </Bal>')
+
+        # --- EINDSALDO (CLBD) - MOET HIER STAAN! ---
+        sign_cl = "CRDT" if closing_balance_val >= 0 else "DBIT"
+        xml_output.append('      <Bal>')
+        xml_output.append('        <Tp><CdOrPrtry><Cd>CLBD</Cd></CdOrPrtry></Tp>')
+        xml_output.append(f'        <Amt Ccy="EUR">{abs(closing_balance_val):.2f}</Amt>')
+        xml_output.append(f'        <CdtDbtInd>{sign_cl}</CdtDbtInd>')
+        xml_output.append(f'        <Dt><Dt>{datum_iso}</Dt></Dt>')
+        xml_output.append('      </Bal>')
+
+        # --- TRANSACTIES (Ntry) ---
         for t in transactions:
-            ntry = ET.SubElement(stmt, "Ntry")
-            amt_tag = ET.SubElement(ntry, "Amt", Ccy="EUR")
-            amt_tag.text = f"{t['amt']:.2f}"
+            xml_output.append('      <Ntry>')
+            xml_output.append(f'        <Amt Ccy="EUR">{t["amt"]:.2f}</Amt>')
+            xml_output.append(f'        <CdtDbtInd>{t["sign"]}</CdtDbtInd>')
+            xml_output.append('        <Sts>BOOK</Sts>')
+            xml_output.append(f'        <BookgDt><Dt>{datum_iso}</Dt></BookgDt>')
+            xml_output.append(f'        <ValDt><Dt>{datum_iso}</Dt></ValDt>')
+            xml_output.append('        <BkTxCd>')
+            xml_output.append('          <Domn>')
+            xml_output.append(f'            <Cd>{t["dom"]}</Cd>')
+            xml_output.append(f'            <Fmly><Cd>{t["fam"]}</Cd><SubFmlyCd>{t["sub"]}</SubFmlyCd></Fmly>')
+            xml_output.append('          </Domn>')
+            xml_output.append('        </BkTxCd>')
+            xml_output.append('        <NtryDtls>')
+            xml_output.append('          <TxDtls>')
+            xml_output.append(f'            <RmtInf><Ustrd>{t["desc"]}</Ustrd></RmtInf>')
+            xml_output.append('          </TxDtls>')
+            xml_output.append('        </NtryDtls>')
+            xml_output.append('      </Ntry>')
             
-            cdt_dbt = ET.SubElement(ntry, "CdtDbtInd")
-            cdt_dbt.text = t['sign']
-            
-            sts = ET.SubElement(ntry, "Sts")
-            sts.text = "BOOK"
-            
-            # Datums toevoegen (BookgDt EN ValDt)
-            bk_dt = ET.SubElement(ntry, "BookgDt")
-            dt_tag = ET.SubElement(bk_dt, "Dt")
-            dt_tag.text = row['Datum']
-            
-            val_dt = ET.SubElement(ntry, "ValDt")
-            val_dt_tag = ET.SubElement(val_dt, "Dt")
-            val_dt_tag.text = row['Datum']
-            
-            bk_tx_cd = ET.SubElement(ntry, "BkTxCd")
-            dom = ET.SubElement(bk_tx_cd, "Domn")
-            cd_dom = ET.SubElement(dom, "Cd")
-            cd_dom.text = t['dom']
-            fam = ET.SubElement(dom, "Fmly")
-            cd_fam = ET.SubElement(fam, "Cd")
-            cd_fam.text = t['fam']
-            sub_fam = ET.SubElement(fam, "SubFmlyCd")
-            sub_fam.text = t['sub']
-            
-            ntry_dtls = ET.SubElement(ntry, "NtryDtls")
-            tx_dtls = ET.SubElement(ntry_dtls, "TxDtls")
-            rmt_inf = ET.SubElement(tx_dtls, "RmtInf")
-            ustrd = ET.SubElement(rmt_inf, "Ustrd")
-            ustrd.text = t['desc']
-            
-        # Update current balance for next day
+        xml_output.append('    </Stmt>')
+        
+        # Saldo doorzetten naar volgende dag
         current_balance_val = closing_balance_val
 
-    # Update sequence
+    # Update sequence en afsluiten
     config["coda_seq"] = coda_seq
     save_config(config)
     
-    xml_str = ET.tostring(root, encoding='utf-8', method='xml')
+    xml_output.append('  </BkToCstmrStmt>')
+    xml_output.append('</Document>')
+    
+    # Alles samenvoegen tot 1 string
+    full_xml_string = "\n".join(xml_output)
     filename = f"CAMT053_{my_iban}_{datetime.now().strftime('%Y%m%d')}.xml"
-    return xml_str, filename
-
-# --- STATE ---
-if 'reset_count' not in st.session_state: st.session_state.reset_count = 0
-if 'show_success_toast' not in st.session_state: st.session_state['show_success_toast'] = False
-if 'date_picker_val' not in st.session_state: st.session_state.date_picker_val = datetime.now().date()
-
-def prev_day(): st.session_state.date_picker_val -= timedelta(days=1)
-def next_day(): 
-    if st.session_state.date_picker_val < datetime.now().date():
-        st.session_state.date_picker_val += timedelta(days=1)
-def update_date(): pass
-
-# ==========================================
-# ⚙️ SIDEBAR
-# ==========================================
-with st.sidebar:
-    st.header("⚙️ Menu")
-    pwd = st.text_input("Boekhouder Login", type="password", placeholder="Wachtwoord")
-    is_admin = (pwd == ADMIN_PASSWORD)
-    app_mode = "Invoer" 
     
-    if is_admin:
-        st.success("🔓 Admin")
-        app_mode = st.radio("Ga naar:", ["Invoer", "Export (Yuki)", "Instellingen", "Export Configuratie", "Kassaldo Beheer"])
-    st.divider()
-    if app_mode == "Invoer":
-        st.subheader("Profiel")
-        sector_keuze = st.selectbox("Sector:", ["Detailhandel", "Medisch", "Tandarts", "Horeca", "Bakkerij"])
-        def_0, def_6, def_12, def_21 = True, True, False, True 
-        if "Medisch" in sector_keuze: def_0, def_6, def_12, def_21 = True, False, False, False
-        elif "Tandarts" in sector_keuze: def_0, def_6, def_12, def_21 = True, False, False, True
-        elif "Horeca" in sector_keuze: def_0, def_6, def_12, def_21 = False, False, True, True
-        elif "Bakkerij" in sector_keuze: def_0, def_6, def_12, def_21 = False, True, False, True
-        st.caption("Instellingen")
-        use_0  = st.checkbox("0%", value=def_0)
-        use_6  = st.checkbox("6%", value=def_6)
-        use_12 = st.checkbox("12%", value=def_12)
-        use_21 = st.checkbox("21%", value=def_21)
-        use_bc   = st.checkbox("Bancontact", value=True)
-        use_cash = st.checkbox("Cash", value=True)
-        use_payq = st.checkbox("Payconiq", value=True)
-        use_over = st.checkbox("Overschrijving", value=True)
-        use_vouc = st.checkbox("Cadeaubonnen", value=False)
-
-# ==========================================
-# 📅 HOOFDSCHERM
-# ==========================================
-
-if app_mode == "Invoer":
-    if st.session_state['show_success_toast']:
-        st.toast("Opgeslagen!", icon="✅")
-        st.session_state['show_success_toast'] = False
-    
-    datum_geselecteerd = st.session_state.date_picker_val
-    
-    # Header & Status
-    check_data = get_data_by_date(datum_geselecteerd)
-    openings_saldo = calculate_current_saldo(datum_geselecteerd)
-    
-    if check_data is not None:
-        omz = float(check_data['Totaal_Omzet'])
-        gld = float(check_data['Totaal_Geld'])
-        if omz == 0 and gld == 0: status_html = "<div class='info-card card-blue'>💤 GESLOTEN</div>"
-        else: status_html = f"<div class='info-card card-green'>✅ OK: € {omz:.2f}</div>"
-    elif datum_geselecteerd > datetime.now().date(): status_html = "<div class='info-card card-grey'>🔒 TOEKOMST</div>"
-    else: status_html = "<div class='info-card card-red'>📝 NOG INVULLEN</div>"
-
-    dag_naam = datum_geselecteerd.strftime("%A").upper()
-    saldo_html = f"<div class='info-card card-grey'>💰 Saldo: € {openings_saldo:.2f}</div>"
-    if check_data is not None: sub_txt, sub_col = "✅ Reeds verwerkt", "green"
-    elif datum_geselecteerd > datetime.now().date(): sub_txt, sub_col = "🔒 Toekomst", "grey"
-    else: sub_txt, sub_col = "❌ Nog in te vullen", "red"
-
-    col_left, col_center, col_right = st.columns([1.5, 2, 1.5])
-    with col_left:
-        st.markdown(status_html, unsafe_allow_html=True)
-        st.button("⬅️ Vorige", on_click=prev_day, use_container_width=True)
-    with col_center:
-        st.markdown(f"<div class='day-header'>{dag_naam}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='sub-status' style='color:{sub_col}'>{sub_txt}</div>", unsafe_allow_html=True)
-        st.date_input("Datum", value=st.session_state.date_picker_val, max_value=datetime.now().date(), label_visibility="collapsed", key="date_picker_val")
-    with col_right:
-        st.markdown(saldo_html, unsafe_allow_html=True)
-        is_today = (datum_geselecteerd >= datetime.now().date())
-        st.button("Volgende ➡️", on_click=next_day, disabled=is_today, use_container_width=True)
-
-    st.divider()
-
-    # Invoer
-    if datum_geselecteerd > datetime.now().date(): st.info("Toekomst.")
-    else:
-        existing_data = get_data_by_date(datum_geselecteerd)
-        is_overwrite_mode = existing_data is not None
-        omschr_value = existing_data.get("Omschrijving", "") if is_overwrite_mode else ""
-        omschrijving = st.text_input("Omschrijving", value=omschr_value, placeholder=f"Dagontvangsten {datum_geselecteerd.strftime('%d-%m-%Y')}", key=f"omschr_{datum_geselecteerd}")
-        
-        is_gesloten = st.checkbox("🚫 Zaak gesloten", value=(is_overwrite_mode and float(existing_data['Totaal_Omzet']) == 0))
-        if is_gesloten:
-            st.info("Status: Gesloten")
-            som_omzet, som_geld, verschil, cash_in_today, cash_out_today = 0.0, 0.0, 0.0, 0.0, 0.0
-            edited_df = None 
-            if not omschrijving: omschrijving = "SLUITINGSDAG"
-        else:
-            def get_val(col_name): return float(existing_data.get(col_name, 0.0)) if is_overwrite_mode else 0.00
-            data_items = []
-            if use_0:  data_items.append({"Sectie": "1. TICKET", "Label": "🎫 0% (Vrijgesteld)", "Bedrag": get_val("Omzet_0"), "Type": "Omzet"})
-            if use_6:  data_items.append({"Sectie": "1. TICKET", "Label": "🎫 6% (Voeding)",      "Bedrag": get_val("Omzet_6"), "Type": "Omzet"})
-            if use_12: data_items.append({"Sectie": "1. TICKET", "Label": "🎫 12% (Horeca)",      "Bedrag": get_val("Omzet_12"), "Type": "Omzet"})
-            if use_21: data_items.append({"Sectie": "1. TICKET", "Label": "🎫 21% (Algemeen)",    "Bedrag": get_val("Omzet_21"), "Type": "Omzet"})
-            if use_bc:   data_items.append({"Sectie": "2. GELD", "Label": "💳 Bancontact",      "Bedrag": get_val("Geld_Bancontact"), "Type": "Geld"})
-            if use_cash: data_items.append({"Sectie": "2. GELD", "Label": "💶 Cash (Lade)",     "Bedrag": get_val("Geld_Cash"), "Type": "Geld"})
-            if use_payq: data_items.append({"Sectie": "2. GELD", "Label": "📱 Payconiq",        "Bedrag": get_val("Geld_Payconiq"), "Type": "Geld"})
-            if use_over: data_items.append({"Sectie": "2. GELD", "Label": "🏦 Overschrijving", "Bedrag": get_val("Geld_Overschrijving"), "Type": "Geld"})
-            if use_vouc: data_items.append({"Sectie": "2. GELD", "Label": "🎁 Bonnen",          "Bedrag": get_val("Geld_Bonnen"), "Type": "Geld"})
-            data_items.append({"Sectie": "3. BANK", "Label": "🏦 Afstorting",     "Bedrag": get_val("Geld_Afstorting"), "Type": "Afstorting"})
-
-            df_start = pd.DataFrame(data_items)
-            edited_df = st.data_editor(
-                df_start,
-                column_config={
-                    "Sectie": st.column_config.TextColumn("Groep", disabled=True),
-                    "Label": st.column_config.TextColumn("Omschrijving", disabled=True),
-                    "Bedrag": st.column_config.NumberColumn("Waarde (€)", min_value=0, format="%.2f"),
-                    "Type": None
-                },
-                hide_index=True, use_container_width=True, num_rows="fixed",
-                height=(len(data_items) * 35) + 38,
-                key=f"editor_{datum_geselecteerd}_{st.session_state.reset_count}"
-            )
-            regels = edited_df[edited_df["Type"] != "Separator"].copy()
-            regels["Bedrag"] = regels["Bedrag"].fillna(0.0)
-            som_omzet = regels[regels["Type"] == "Omzet"]["Bedrag"].sum()
-            som_geld = regels[regels["Type"] == "Geld"]["Bedrag"].sum()
-            verschil = round(som_omzet - som_geld, 2)
-            cash_in_today = regels[regels["Label"] == "💶 Cash (Lade)"]["Bedrag"].sum()
-            cash_out_today = regels[regels["Type"] == "Afstorting"]["Bedrag"].sum()
-
-        eind_saldo = openings_saldo + cash_in_today - cash_out_today
-
-        st.markdown("---")
-        c_links, c_rechts = st.columns(2)
-        with c_links:
-            st.markdown("#### 📊 Dag Controle")
-            if is_gesloten: st.info("Status: Gesloten")
-            elif verschil == 0 and som_omzet > 0: st.success(f"✅ Balans OK: € {som_omzet:.2f}")
-            elif som_omzet == 0: st.info("Nog in te vullen")
-            else: st.error(f"❌ Verschil: € {verschil:.2f}")
-        with c_rechts:
-            st.markdown("#### 💰 Kassaldo")
-            st.write(f"Begin: € {openings_saldo:.2f}")
-            st.write(f"+ Cash: € {cash_in_today:.2f}")
-            st.write(f"- Bank: € {cash_out_today:.2f}")
-            st.markdown(f"**= Eind: € {eind_saldo:.2f}**")
-
-        st.divider()
-        overwrite_confirmed = True
-        if is_overwrite_mode: overwrite_confirmed = st.checkbox("Ik wil wijzigingen opslaan", value=False)
-        is_valid = ((som_omzet > 0 and verschil == 0) or is_gesloten) and overwrite_confirmed
-        label = "🔄 Opslaan" if is_overwrite_mode else "💾 Opslaan"
-        st.button(label, type="primary", disabled=not is_valid, use_container_width=True,
-                  on_click=handle_save_click,
-                  args=(datum_geselecteerd, omschrijving, edited_df, som_omzet, som_geld, verschil))
-
-    # --- MAAND OVERZICHT (ONDERAAN) ---
-    with st.expander("📅 Bekijk status maandoverzicht", expanded=False):
-        huidige_maand = datum_geselecteerd.month
-        huidig_jaar = datum_geselecteerd.year
-        df_hist = load_database()
-        num_days = calendar.monthrange(huidig_jaar, huidige_maand)[1]
-        days = [date(huidig_jaar, huidige_maand, day) for day in range(1, num_days + 1)]
-        status_list = []
-        for d in days:
-            d_str = str(d)
-            row = df_hist[df_hist['Datum'] == d_str]
-            omzet = 0.0
-            status_txt = "⚪"
-            if not row.empty:
-                omzet_val = float(row.iloc[0]['Totaal_Omzet'])
-                geld_val = float(row.iloc[0]['Totaal_Geld'])
-                if omzet_val == 0 and geld_val == 0: status_txt = "💤"
-                else: 
-                    status_txt = "✅"
-                    omzet = omzet_val
-            elif d < date.today(): status_txt = "❌"
-            status_list.append({"Datum": d.strftime("%d-%m"), "Dag": d.strftime("%a"), "Status": status_txt, "Omzet": f"€ {omzet:.2f}" if omzet > 0 else "-"})
-        st.dataframe(pd.DataFrame(status_list), hide_index=True, use_container_width=True)
-
-elif app_mode == "Kassaldo Beheer":
-    st.header("💰 Kassaldo Beheer")
-    st.info("Stel hier het initiële startsaldo en de CODA gegevens in.")
-    
-    config = load_config()
-    curr_start = config.get("start_saldo", 0.0)
-    curr_iban = config.get("iban", "")
-    curr_seq = config.get("coda_seq", 0)
-    
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        new_start = st.number_input("Startsaldo (€)", value=float(curr_start), step=10.0, format="%.2f")
-    with c2:
-        new_iban_input = st.text_input("IBAN", value=curr_iban, help="Kopieer de IBAN van het Kasboek uit Yuki")
-    with c3:
-        new_seq = st.number_input("Laatste Volgnummer", value=int(curr_seq), step=1)
-    
-    if st.button("Genereer Random IBAN (Noodgeval)"):
-        new_iban_input = generate_valid_belgian_iban()
-        st.rerun()
-
-    if st.button("💾 Opslaan Instellingen"):
-        config["start_saldo"] = new_start
-        config["coda_seq"] = new_seq
-        config["iban"] = new_iban_input 
-        save_config(config)
-        st.success("Opgeslagen!")
-
-elif app_mode == "Export (Yuki)":
-    st.header("📤 Export Yuki")
-    col_start, col_end = st.columns(2)
-    start_date = col_start.date_input("Van", datetime(datetime.now().year, datetime.now().month, 1))
-    end_date = col_end.date_input("Tot", datetime.now())
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("Genereer CSV (Import)", type="primary", use_container_width=True):
-            yuki_df = generate_csv_export(start_date, end_date)
-            if yuki_df is not None:
-                st.success(f"{len(yuki_df)} regels.")
-                csv = yuki_df.to_csv(sep=';', index=False).encode('utf-8-sig')
-                st.download_button("Download CSV", csv, "export.csv", "text/csv")
-            else: st.warning("Geen data.")
-    with c2:
-        if st.button("Genereer XML (camt.053)", type="secondary", use_container_width=True):
-            xml_content, filename = generate_xml_export(start_date, end_date)
-            if xml_content:
-                st.success(f"XML gegenereerd: {filename}")
-                st.download_button("Download .xml", xml_content, filename, "text/xml")
-            else:
-                st.warning("Geen data.")
-
-elif app_mode == "Export Configuratie":
-    st.header("📤 Export Configuratie (CSV)")
-    current_export_config = load_export_config()
-    source_options = ["Vast", "Veld"]
-    internal_fields = ["Datum", "Omschrijving", "Bedrag", "Grootboekrekening", "BtwCode", "Label"]
-    edited_export = st.data_editor(current_export_config, column_config={"Kolom": st.column_config.TextColumn("CSV Kolom", required=True), "Bron": st.column_config.SelectboxColumn("Type", options=source_options), "Waarde": st.column_config.TextColumn("Waarde")}, num_rows="dynamic", use_container_width=True, hide_index=True)
-    if st.button("💾 Opslaan", type="primary"):
-        save_export_config(edited_export)
-        st.success("Opgeslagen!")
-
-elif app_mode == "Instellingen":
-    st.header("⚙️ Rekeningen & Omschrijvingen")
-    st.info("Gebruik &datum&, &label& of &notitie& in de tekst.")
-    current_settings = load_settings()
-    
-    edited_settings = st.data_editor(
-        current_settings, 
-        column_order=["Rekening", "BtwCode", "Label", "ExportDesc"],
-        column_config={
-            "Code": None, 
-            "Label": st.column_config.TextColumn("Label", required=True),
-            "Rekening": st.column_config.TextColumn("Grootboekrekening", required=True),
-            "ExportDesc": st.column_config.TextColumn("Omschrijving"),
-            "BtwCode": st.column_config.TextColumn("BTW Code"),
-            "Type": None
-        },
-        hide_index=True, use_container_width=True, num_rows="fixed"
-    )
-    
-    if st.button("Opslaan", type="primary"):
-        save_settings(edited_settings)
-        st.success("Opgeslagen!")
+    return full_xml_string, filename
