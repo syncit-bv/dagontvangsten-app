@@ -1,26 +1,25 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta, date
-import time
 import os
-import locale
-import calendar
 import json
 import random
-from jinja2 import Environment, FileSystemLoader # Import voor de templates
+from jinja2 import Environment, FileSystemLoader
+import streamlit_shadcn_ui as ui
+
+# --- CONFIG ---
+DATA_FILE = "kassa_historiek.csv"
+SETTINGS_FILE = "kassa_settings.csv"
+EXPORT_CONFIG_FILE = "export_config.csv"
+CONFIG_FILE = "kassa_config.json"
+ADMIN_PASSWORD = "Yuki2025!"
+
+st.set_page_config(page_title="Dagontvangsten Pro", page_icon="💶", layout="centered")
 
 # Probeer NL instellingen
 try: locale.setlocale(locale.LC_TIME, 'nl_NL.UTF-8')
 except: pass
 
-# --- CONFIGURATIE ---
-DATA_FILE = "kassa_historiek.csv"
-SETTINGS_FILE = "kassa_settings.csv"
-EXPORT_CONFIG_FILE = "export_config.csv"
-CONFIG_FILE = "kassa_config.json"
-ADMIN_PASSWORD = "Yuki2025!" 
-
-st.set_page_config(page_title="Dagontvangsten App", page_icon="💶", layout="centered")
 
 # --- CSS STYLING ---
 st.markdown("""
@@ -39,6 +38,7 @@ st.markdown("""
     div[data-testid="stDateInput"] { text-align: center; }
     </style>
     """, unsafe_allow_html=True)
+
 
 # --- FUNCTIES: CONFIG & SETTINGS ---
 
@@ -384,6 +384,19 @@ def update_date(): pass
 # ⚙️ SIDEBAR
 # ==========================================
 with st.sidebar:
+    ui.badge("Dagontvangsten Pro", color="blue", class_name="text-2xl font-bold mb-6")
+    
+    pwd = st.text_input("Admin wachtwoord", type="password")
+    is_admin = (pwd == ADMIN_PASSWORD)
+    
+    if is_admin:
+        ui.badge("🔓 Admin toegang", color="green")
+        app_mode = ui.tabs(["Invoer", "Export (Yuki)", "Instellingen", "Kassaldo", "Export Config"], default_index=0, key="main_tabs")
+    else:
+        st.info("Voer admin-wachtwoord in voor volledige toegang")
+        app_mode = "Invoer"
+
+with st.sidebar:
     st.header("⚙️ Menu")
     pwd = st.text_input("Boekhouder Login", type="password", placeholder="Wachtwoord")
     is_admin = (pwd == ADMIN_PASSWORD)
@@ -415,6 +428,25 @@ with st.sidebar:
 # ==========================================
 # 📅 HOOFDSCHERM
 # ==========================================
+if app_mode == "Invoer":
+    ui.card(title=f"Dagontvangsten — {date.today().strftime('%d %B %Y')}", 
+            description="Vul de dagelijkse ontvangsten in", 
+            class_name="mb-6")
+    
+    # Datum navigatie met buttons
+    col1, col2, col3 = st.columns([1,2,1])
+    with col1:
+        if ui.button("⬅️ Vorige dag", key="prev"):
+            st.session_state.date_picker_val -= timedelta(days=1)
+            st.rerun()
+    with col2:
+        selected_date = st.date_input("Datum", value=st.session_state.get("date_picker_val", date.today()), 
+                                      max_value=date.today(), key="date_picker_val")
+    with col3:
+        if selected_date < date.today():
+            if ui.button("Volgende ➡️", key="next"):
+                st.session_state.date_picker_val += timedelta(days=1)
+                st.rerun()
 
 if app_mode == "Invoer":
     if st.session_state['show_success_toast']:
@@ -636,6 +668,12 @@ elif app_mode == "Instellingen":
         hide_index=True, use_container_width=True, num_rows="fixed"
     )
     
-    if st.button("Opslaan", type="primary"):
+    if ui.button("Opslaan dagafsluiting", type="primary", size="lg", use_container_width=True):
         save_settings(edited_settings)
-        st.success("Opgeslagen!")
+        st.success("Dag opgeslagen!")
+
+
+# ==========================================
+# 📅 EINDE HOOFDSCHERM
+# ==========================================
+st.markdown("### Gemaakt met ❤️ — Beter dan Scrada")
