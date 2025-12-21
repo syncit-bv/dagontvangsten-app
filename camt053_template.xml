@@ -1,11 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02" 
-          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
     <BkToCstmrStmt>
         <GrpHdr>
             <MsgId>{{ msg_id }}</MsgId>
             <CreDtTm>{{ creation_datetime }}</CreDtTm>
-            <!-- Optioneel maar netjes: aantal statements -->
             <NbOfStmts>{{ statements|length }}</NbOfStmts>
         </GrpHdr>
 
@@ -14,15 +12,13 @@
             <Id>{{ stmt.id }}</Id>
             <ElctrncSeqNb>{{ stmt.seq_nb }}</ElctrncSeqNb>
             <CreDtTm>{{ creation_datetime }}</CreDtTm>
-
-            <!-- Account informatie -->
             <Acct>
                 <Id><IBAN>{{ iban }}</IBAN></Id>
-                <Tp><Cd>CASH</Cd></Tp>  <!-- Aanbevolen: expliciet kasboek -->
+                <Tp><Cd>CASH</Cd></Tp>
                 <Ccy>EUR</Ccy>
             </Acct>
 
-            <!-- Opening balance -->
+            <!-- Opening Balance -->
             <Bal>
                 <Tp><CdOrPrtry><Cd>OPBD</Cd></CdOrPrtry></Tp>
                 <Amt Ccy="EUR">{{ "%.2f"|format(stmt.opening_balance|float|abs) }}</Amt>
@@ -30,7 +26,7 @@
                 <Dt><Dt>{{ stmt.date }}</Dt></Dt>
             </Bal>
 
-            <!-- Closing balance -->
+            <!-- Closing Balance -->
             <Bal>
                 <Tp><CdOrPrtry><Cd>CLBD</Cd></CdOrPrtry></Tp>
                 <Amt Ccy="EUR">{{ "%.2f"|format(stmt.closing_balance|float|abs) }}</Amt>
@@ -45,7 +41,6 @@
                 <Sts>BOOK</Sts>
                 <BookgDt><Dt>{{ stmt.date }}</Dt></BookgDt>
                 <ValDt><Dt>{{ stmt.date }}</Dt></ValDt>
-
                 <BkTxCd>
                     <Domn>
                         <Cd>{{ ntry.dom }}</Cd>
@@ -55,14 +50,13 @@
                         </Fmly>
                     </Domn>
                 </BkTxCd>
-
                 <NtryDtls>
                     <Btch>
                         <NbOfTxs>{{ stmt.entries|length }}</NbOfTxs>
                     </Btch>
                     <TxDtls>
                         <Refs>
-                            <AcctSvcrRef>{{ stmt.id }}</AcctSvcrRef>
+                            <AcctSvcrRef>{{ stmt.id }}-{{ loop.index }}</AcctSvcrRef>
                         </Refs>
                         <RmtInf>
                             <Ustrd>{{ ntry.desc }}</Ustrd>
